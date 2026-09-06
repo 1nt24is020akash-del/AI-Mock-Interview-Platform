@@ -1,5 +1,4 @@
 const Groq = require("groq-sdk");
-const pdfjslib = require("pdfjs-dist/legacy/build/pdf.js");
 const { extractTextFromDOCX } = require("../utils/docx-extractor.js");
 
 // Standard Interview Domains supported by the platform
@@ -24,7 +23,7 @@ const DOMAIN_SKILL_KEYWORDS = {
   "React": [
     "react", "react.js", "reactjs", "next.js", "nextjs", "redux", "zustand",
     "tailwind", "tailwindcss", "shadcn", "jsx", "tsx", "hooks", "vite",
-    "html", "css", "css3", "sass", "frontend", "ui/ux", "responsive"
+    "html", "css", "css3", "sass", "frontend", "ui/ux", "responsive", "web applications"
   ],
   "Python": [
     "python", "django", "flask", "fastapi", "pytest", "celery", "poetry",
@@ -34,7 +33,7 @@ const DOMAIN_SKILL_KEYWORDS = {
     "machine learning", "deep learning", "pandas", "numpy", "scikit-learn",
     "tensorflow", "pytorch", "nlp", "computer vision", "data analysis",
     "tableau", "power bi", "matplotlib", "seaborn", "statistics", "data science",
-    "analytics", "ai", "artificial intelligence"
+    "analytics", "ai", "artificial intelligence", "ml"
   ],
   "DevOps": [
     "docker", "kubernetes", "k8s", "aws", "azure", "gcp", "ci/cd", "ci / cd",
@@ -67,7 +66,7 @@ const SKILL_TAXONOMY = {
     { match: "java", label: "Java", boundary: true },
     { match: "c++", label: "C++" },
     { match: "c#", label: "C#" },
-    { match: "c", label: "C", boundary: true },
+    { match: "c", label: "C", singleLetter: true },
     { match: "golang", label: "Go" },
     { match: "go", label: "Go", boundary: true },
     { match: "rust", label: "Rust", boundary: true },
@@ -193,6 +192,8 @@ const SKILL_TAXONOMY = {
     { match: "deep learning", label: "Deep Learning" },
     { match: "pandas", label: "Pandas" },
     { match: "numpy", label: "NumPy" },
+    { match: "problem solving", label: "Problem Solving" },
+    { match: "oop", label: "OOP" },
   ],
 };
 
@@ -200,12 +201,34 @@ const INVALID_RESUME_MESSAGE =
   "Unable to analyze this document. Please upload a valid resume containing sufficient information about your skills, education, projects, experience, or qualifications.";
 
 /**
- * Extracts raw text from PDF buffer using pdfjs-dist legacy build.
+ * Extracts raw text from PDF buffer using pdf-parse v2 first, then pdfjs-dist fallback.
  */
 async function extractTextFromPDF(buffer) {
+  // Strategy 1: pdf-parse v2 (Pure JavaScript, fast & reliable)
   try {
+    const { PDFParse } = require("pdf-parse");
+    if (PDFParse) {
+      const parser = new PDFParse({ data: buffer });
+      const res = await parser.getText();
+      await parser.destroy();
+      if (res && res.text && res.text.trim().length > 30) {
+        return res.text;
+      }
+    }
+  } catch (parseErr) {
+    console.warn("PDFParse v2 notice:", parseErr.message);
+  }
+
+  // Strategy 2: pdfjs-dist fallback
+  try {
+    const pdfjslib = require("pdfjs-dist/legacy/build/pdf.js");
     const uint8Array = new Uint8Array(buffer);
-    const loadingTask = pdfjslib.getDocument({ data: uint8Array });
+    const loadingTask = pdfjslib.getDocument({
+      data: uint8Array,
+      useSystemFonts: true,
+      disableFontFace: true,
+      isEvalSupported: false,
+    });
     const pdf = await loadingTask.promise;
     let textContent = "";
     for (let i = 1; i <= pdf.numPages; i++) {
@@ -214,18 +237,20 @@ async function extractTextFromPDF(buffer) {
       const strings = content.items.map((item) => item.str);
       textContent += strings.join(" ") + "\n";
     }
-    return textContent;
-  } catch (err) {
-    console.warn("pdfjs-dist extraction failed, trying pdf-parse fallback:", err.message);
-    try {
-      const pdfParse = require("pdf-parse");
-      const data = await pdfParse(buffer);
-      return data.text || "";
-    } catch (parseErr) {
-      console.warn("pdf-parse fallback also failed:", parseErr.message);
-      throw parseErr;
+    if (textContent.trim().length > 30) {
+      return textContent;
     }
+  } catch (pdfjsErr) {
+    console.warn("pdfjs-dist extraction notice:", pdfjsErr.message);
   }
+
+  // Strategy 3: raw text fallback
+  const rawText = buffer.toString("utf-8");
+  if (rawText && rawText.trim().length > 50) {
+    return rawText;
+  }
+
+  throw new Error("Unable to extract text from PDF document.");
 }
 
 /**
@@ -260,73 +285,113 @@ async function extractTextFromFile(file) {
 }
 
 /**
- * Strict Resume Validation
- * Ensures document is a genuine resume, CV, or candidate profile.
+ * Flexible Resume Validation
+ * Validates based on actual extracted content and detected resume sections.
+ * Accepts meaningful combinations such as Education + Skills + Projects,
+ * Education + Skills + Internship, Skills + Projects + Certifications, etc.
  */
 function validateResumeText(text) {
-  if (!text || typeof text !== "string") return false;
-  const cleaned = text.trim();
-  if (cleaned.length < 120) return false;
-
-  const lower = cleaned.toLowerCase();
-
-  // Resume structural and thematic keywords
-  const resumeSignals = [
-    "education",
-    "experience",
-    "work experience",
-    "skills",
-    "technical skills",
-    "projects",
-    "employment",
-    "summary",
-    "objective",
-    "profile",
-    "certifications",
-    "achievements",
-    "qualifications",
-    "curriculum vitae",
-    "resume",
-    "internship",
-    "academic",
-    "bachelor",
-    "master",
-    "b.tech",
-    "b.e",
-    "degree",
-    "university",
-    "college",
-    "cgpa",
-    "gpa",
-    "coursework",
-    "contact",
-  ];
-
-  let matchedSignals = 0;
-  for (const signal of resumeSignals) {
-    if (lower.includes(signal)) {
-      matchedSignals++;
-    }
+  if (!text || typeof text !== "string") {
+    console.log("=== RESUME VALIDATION DEBUG ===");
+    console.log("Extracted text length: 0");
+    console.log("Validation result: REJECTED");
+    console.log("Exact reason for rejection: Text is empty or invalid format");
+    console.log("===============================");
+    return false;
   }
 
-  // Check for email, phone, or github/linkedin
-  const hasEmail = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(cleaned);
-  const hasPhone = /(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/.test(cleaned);
-  const hasProfileLink = /linkedin\.com|github\.com/i.test(cleaned);
-  const hasContactInfo = hasEmail || hasPhone || hasProfileLink;
+  const cleaned = text.trim();
+  const textLength = cleaned.length;
+  if (textLength < 50) {
+    console.log("=== RESUME VALIDATION DEBUG ===");
+    console.log("Extracted text length:", textLength);
+    console.log("Validation result: REJECTED");
+    console.log("Exact reason for rejection: Document text length is too short (< 50 characters)");
+    console.log("===============================");
+    return false;
+  }
 
-  // Genuine resumes should contain at least 2 distinct resume signals,
-  // and either contact information or at least 3 distinct resume signals.
-  if (matchedSignals >= 3) return true;
-  if (matchedSignals >= 2 && hasContactInfo) return true;
+  const lower = cleaned.toLowerCase();
+  const lines = cleaned.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
 
-  return false;
+  // Detect sections using heading regex
+  const headingRegex = /^(objective|summary|profile|about me|education|academics|academic background|skills|technical skills|technologies|programming|projects|key projects|academic projects|internship|internships|experience|work experience|employment|certifications|certificates|activities|achievements|awards)[\s:]*$/i;
+  const detectedSections = [];
+  lines.forEach((l) => {
+    if (headingRegex.test(l)) detectedSections.push(l);
+  });
+
+  // Major categories evidence
+  const hasEdu =
+    detectedSections.some((s) => /education|academic/i.test(s)) ||
+    /\b(education|academics|degree|university|college|institute|b\.e|b\.tech|bachelor|master|puc|cgpa|gpa|coursework)\b/i.test(lower);
+
+  const hasSkills =
+    detectedSections.some((s) => /skills|technologies|programming/i.test(s)) ||
+    /\b(technical skills|programming languages|web technologies|database skills)\b/i.test(lower) ||
+    (lower.match(/\b(python|java|javascript|typescript|c\+\+|html|css|sql|mongodb|mysql|react|node)\b/g) || []).length >= 2;
+
+  const hasProj =
+    detectedSections.some((s) => /projects/i.test(s)) ||
+    /\b(projects|academic projects|personal projects|mini project|final year project)\b/i.test(lower) ||
+    /\b(chatbot|attendance system|traffic management|application|web app)\b/i.test(lower);
+
+  const hasExpOrIntern =
+    detectedSections.some((s) => /internship|experience/i.test(s)) ||
+    /\b(internship|intern|work experience|employment|trainee|edu-versity)\b/i.test(lower);
+
+  const hasCertsOrActivities =
+    detectedSections.some((s) => /certifications|activities|achievements/i.test(s)) ||
+    /\b(certifications|certificates|certified|hackathon|activities|workshops|awards)\b/i.test(lower);
+
+  const hasContact =
+    /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(cleaned) ||
+    /(?:\+?91[\s-]?)?[6-9]\d{9}|\+?\d{1,3}[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/.test(cleaned) ||
+    /linkedin\.com|github\.com/i.test(cleaned);
+
+  const matchedCategories = [];
+  if (hasEdu) matchedCategories.push("Education");
+  if (hasSkills) matchedCategories.push("Skills");
+  if (hasProj) matchedCategories.push("Projects");
+  if (hasExpOrIntern) matchedCategories.push("Experience/Internship");
+  if (hasCertsOrActivities) matchedCategories.push("Certifications/Activities");
+
+  const validationScore = Math.min(100, matchedCategories.length * 20 + (hasContact ? 15 : 0));
+
+  // Accept if candidate has at least 2 major categories, or 1 major category + contact info
+  const isValid = matchedCategories.length >= 2 || (matchedCategories.length >= 1 && hasContact);
+  const rejectionReason = isValid
+    ? null
+    : `Insufficient resume categories detected (matched ${matchedCategories.length} categories: [${matchedCategories.join(
+        ", "
+      )}], minimum 2 required).`;
+
+  console.log("=== RESUME VALIDATION DEBUG ===");
+  console.log("Extracted text length:", textLength);
+  console.log("Detected sections:", detectedSections);
+  console.log("Major categories matched:", matchedCategories);
+  console.log("Contact info present:", hasContact);
+  console.log("Validation score:", validationScore);
+  console.log("Validation result:", isValid ? "ACCEPTED" : "REJECTED");
+  if (!isValid) {
+    console.log("Exact reason for rejection:", rejectionReason);
+  }
+  console.log("===============================");
+
+  return isValid;
 }
 
 /**
  * Check if a skill exists in text considering word boundaries.
  */
-function containsSkill(textLower, skillItem) {
+function containsSkill(textLower, rawText, skillItem) {
+  if (skillItem.singleLetter) {
+    // For single-letter 'C', ensure it's in programming context or uppercase isolated token
+    return (
+      /(?:programming[:\s]|languages?[:\s]|skills?[:\s]|,\s*|\/\s*)c(?:\s*[,/+]|\s*(?:and|&)\s*c\+\+|\s*\n|$)/i.test(textLower) ||
+      /(?:^|[,\s:/])C(?:[,\s:/]|$)/.test(rawText)
+    );
+  }
   if (skillItem.boundary) {
     const regex = new RegExp(`(?:^|[^a-zA-Z0-9_#+])${skillItem.match.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|[^a-zA-Z0-9_#+])`, "i");
     return regex.test(textLower);
@@ -345,25 +410,30 @@ function performDeterministicAnalysis(rawText) {
 
   // 1. Candidate Info Extraction
   const emailMatch = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-  const phoneMatch = text.match(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/);
+  const phoneMatch = text.match(/(?:\+?91[\s-]?)?[6-9]\d{9}|\+?\d{1,3}[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}|\+?\d{1,3}\s*\d{10}/);
   const linkedinMatch = text.match(/(?:https?:\/\/)?(?:www\.)?linkedin\.com\/(?:in\/)?([a-zA-Z0-9_-]+)/i);
   const githubMatch = text.match(/(?:https?:\/\/)?(?:www\.)?github\.com\/([a-zA-Z0-9_-]+)/i);
   const portfolioMatch = text.match(/(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9-]+\.(?:io|dev|me|vercel\.app|netlify\.app))/i);
 
   // Candidate Name extraction from top lines
   let candidateName = "";
-  for (let i = 0; i < Math.min(6, lines.length); i++) {
+  for (let i = 0; i < Math.min(5, lines.length); i++) {
     const line = lines[i];
     if (
-      line.length >= 3 &&
+      line.length >= 2 &&
       line.length <= 40 &&
       !line.includes("@") &&
       !line.includes("http") &&
       !line.includes(".com") &&
-      !/^(resume|curriculum|cv|contact|profile|summary|education|skills|projects)/i.test(line) &&
+      !line.includes("+91") &&
+      !/^(objective|summary|resume|cv|contact|education|skills|projects|degree)/i.test(line) &&
       /^[a-zA-Z\s.'-]+$/.test(line)
     ) {
-      candidateName = line;
+      if (line === line.toUpperCase() && line.length > 2) {
+        candidateName = line.charAt(0) + line.slice(1).toLowerCase();
+      } else {
+        candidateName = line;
+      }
       break;
     }
   }
@@ -371,9 +441,10 @@ function performDeterministicAnalysis(rawText) {
   // Professional Title / Headline detection
   let detectedTitle = "";
   const titleKeywords = [
+    "Information Science Student", "Computer Science Student",
     "Full Stack Developer", "Software Engineer", "Frontend Developer", "Backend Developer",
     "Data Scientist", "Machine Learning Engineer", "DevOps Engineer", "Cloud Engineer",
-    "Web Developer", "Mobile App Developer", "Software Development Engineer", "Computer Science Student"
+    "Web Developer", "Software Development Engineer"
   ];
   for (const title of titleKeywords) {
     if (lower.includes(title.toLowerCase())) {
@@ -397,7 +468,7 @@ function performDeterministicAnalysis(rawText) {
   for (const [category, skillList] of Object.entries(SKILL_TAXONOMY)) {
     const set = new Set();
     for (const item of skillList) {
-      if (containsSkill(lower, item)) {
+      if (containsSkill(lower, text, item)) {
         set.add(item.label);
         allDetectedSkillsSet.add(item.label);
       }
@@ -408,7 +479,6 @@ function performDeterministicAnalysis(rawText) {
   const allSkillsList = Array.from(allDetectedSkillsSet);
 
   // 3. Candidate Level Detection
-  // Check graduation year / student status
   let isStudentOrFresher = false;
   let detectedGradYear = null;
   const currentYear = new Date().getFullYear();
@@ -423,7 +493,7 @@ function performDeterministicAnalysis(rawText) {
     }
   }
 
-  const studentTerms = ["student", "undergraduate", "fresher", "intern", "pursuing", "b.tech", "b.e", "bachelor"];
+  const studentTerms = ["student", "undergraduate", "fresher", "intern", "pursuing", "b.tech", "b.e", "bachelor", "puc", "information science"];
   for (const term of studentTerms) {
     if (lower.includes(term)) {
       isStudentOrFresher = true;
@@ -431,7 +501,6 @@ function performDeterministicAnalysis(rawText) {
     }
   }
 
-  // Check explicit years of experience
   const expMatches = text.match(/(\d+)\+?\s*(?:years?|yrs?)(?:\s+of)?(?:\s+experience)?/gi) || [];
   let maxExpYears = 0;
   for (const em of expMatches) {
@@ -446,20 +515,20 @@ function performDeterministicAnalysis(rawText) {
   let simplifiedLevel = "Junior";
 
   if (
-    maxExpYears >= 6 ||
-    /\b(senior|lead|principal|architect|staff engineer|tech lead)\b/i.test(text)
+    !isStudentOrFresher &&
+    (maxExpYears >= 6 || /\b(senior|lead|principal|architect|staff engineer|tech lead)\b/i.test(text))
   ) {
     candidateLevel = "Senior Developer / Lead";
     simplifiedLevel = "Senior";
     candidateLevelReason = `Identified senior engineering leadership experience${maxExpYears ? ` with ~${maxExpYears}+ years of industry track record` : " and high-level architectural responsibilities"}.`;
   } else if (
-    maxExpYears >= 3 ||
-    /\b(mid-level|software engineer ii|sde ii|experienced developer)\b/i.test(text)
+    !isStudentOrFresher &&
+    (maxExpYears >= 3 || /\b(mid-level|software engineer ii|sde ii|experienced developer)\b/i.test(text))
   ) {
     candidateLevel = "Mid-Level Developer";
     simplifiedLevel = "Mid";
     candidateLevelReason = `Identified established mid-level experience${maxExpYears ? ` with ~${maxExpYears} years of industry development` : " demonstrating independent feature delivery"}.`;
-  } else if (maxExpYears >= 1 || (allSkillsList.length >= 6 && !isStudentOrFresher)) {
+  } else if (maxExpYears >= 1 && !isStudentOrFresher) {
     candidateLevel = "Junior Developer";
     simplifiedLevel = "Junior";
     candidateLevelReason = "Demonstrated practical programming foundation and hands-on technical project delivery.";
@@ -467,11 +536,10 @@ function performDeterministicAnalysis(rawText) {
     candidateLevel = "Fresher / Entry Level";
     simplifiedLevel = "Junior";
     candidateLevelReason = detectedGradYear
-      ? `Academic profile with expected/recent graduation in ${detectedGradYear} and hands-on project implementations.`
+      ? `Academic profile with expected graduation in ${detectedGradYear} and practical project implementations.`
       : "Entry-level candidate profile with focus on foundational programming skills and academic projects.";
   }
 
-  // If candidate is title-less, assign based on level and top skill
   if (!detectedTitle) {
     if (candidateLevel.includes("Fresher")) {
       detectedTitle = "Aspiring Software Engineer";
@@ -484,28 +552,28 @@ function performDeterministicAnalysis(rawText) {
     }
   }
 
-  // 4. Section Splitting & Extraction (Education, Projects, Experience, Certifications)
+  // 4. Section Splitting & Extraction
   const sectionKeywords = [
-    { key: "education", regex: /\b(education|academic background|academic qualifications)\b/i },
-    { key: "experience", regex: /\b(work experience|experience|employment history|work history|internships)\b/i },
-    { key: "projects", regex: /\b(projects|key projects|academic projects|personal projects)\b/i },
-    { key: "skills", regex: /\b(skills|technical skills|technologies|skills & tools)\b/i },
-    { key: "certifications", regex: /\b(certifications|certificates|licenses)\b/i },
-    { key: "achievements", regex: /\b(achievements|awards|honors|extracurricular)\b/i },
+    { key: "objective", regex: /^(objective|summary|profile|about me)[\s:]*$/i },
+    { key: "education", regex: /^(education|academics|academic background|academic qualifications)[\s:]*$/i },
+    { key: "skills", regex: /^(skills|technical skills|technologies|programming skills)[\s:]*$/i },
+    { key: "projects", regex: /^(projects|academic projects|key projects|personal projects)[\s:]*$/i },
+    { key: "internship", regex: /^(internship|internships)[\s:]*$/i },
+    { key: "experience", regex: /^(experience|work experience|employment history|work history)[\s:]*$/i },
+    { key: "certifications", regex: /^(certifications|certificates|licenses)[\s:]*$/i },
+    { key: "activities", regex: /^(activities|achievements|awards|extracurricular)[\s:]*$/i },
   ];
 
-  // Identify section line indices
   const sectionPositions = [];
   lines.forEach((line, idx) => {
     for (const sec of sectionKeywords) {
-      if (sec.regex.test(line) && line.length < 45) {
+      if (sec.regex.test(line)) {
         sectionPositions.push({ key: sec.key, lineIdx: idx, heading: line });
         break;
       }
     }
   });
 
-  // Helper to get text of a specific section
   function getSectionContent(sectionKey) {
     const found = sectionPositions.find((s) => s.key === sectionKey);
     if (!found) return "";
@@ -518,38 +586,42 @@ function performDeterministicAnalysis(rawText) {
 
   const educationText = getSectionContent("education");
   const experienceText = getSectionContent("experience");
+  const internshipText = getSectionContent("internship");
   const projectsText = getSectionContent("projects");
   const certsText = getSectionContent("certifications");
-  const achievementsText = getSectionContent("achievements");
+  const activitiesText = getSectionContent("activities");
 
-  // Extract Education items
+  // Extract Education (supports pipe table format and bullet format)
   const educationList = [];
-  const eduLines = educationText ? educationText.split("\n").filter((l) => l.trim().length > 3) : [];
-  if (eduLines.length > 0) {
-    let currentDegree = "";
-    let currentInst = "";
-    let currentYr = "";
-    for (const l of eduLines) {
-      if (/b\.tech|b\.e|bachelor|master|m\.tech|mca|bca|diploma|ph\.d|high school/i.test(l)) {
-        if (currentDegree) {
-          educationList.push({ degree: currentDegree, institution: currentInst || "University / College", year: currentYr || "Recent" });
-        }
-        currentDegree = l;
-        currentInst = "";
-        currentYr = "";
-      } else if (/university|institute|college|school|academy/i.test(l)) {
-        currentInst = l;
-      } else if (/\b(20\d{2})\b/.test(l)) {
-        const yrMatch = l.match(/\b(20\d{2})\b/);
-        if (yrMatch) currentYr = yrMatch[1];
+  const eduLines = educationText ? educationText.split("\n").map((l) => l.trim()).filter((l) => l.length > 2) : [];
+  for (const l of eduLines) {
+    if (/^degree\s*\|\s*institute/i.test(l)) continue; // skip header
+    if (l.includes("|")) {
+      const parts = l.split("|").map((p) => p.trim());
+      if (parts.length >= 2) {
+        const deg = parts[0];
+        const inst = parts[1];
+        const details = parts[2] || "";
+        const yrMatch = details.match(/\b(20\d{2})\b/);
+        const gpaMatch = details.match(/(?:cgpa\s*[\d.]+|\b\d+%\b)/i);
+        educationList.push({
+          degree: deg + (details.includes("ISE") ? " (ISE)" : details.includes("PCMB") ? " (PCMB)" : details.includes("ICSE") ? " (ICSE)" : ""),
+          institution: inst,
+          year: yrMatch ? yrMatch[1] : "Completed",
+          gpa: gpaMatch ? gpaMatch[0] : undefined,
+        });
+        continue;
       }
     }
-    if (currentDegree) {
-      educationList.push({ degree: currentDegree, institution: currentInst || "University / College", year: currentYr || "Recent" });
+    if (/b\.tech|b\.e|bachelor|master|m\.tech|mca|bca|diploma|puc|10th|high school/i.test(l)) {
+      educationList.push({
+        degree: l,
+        institution: "Higher Education Institution",
+        year: l.match(/\b(20\d{2})\b/)?.[1] || "Completed",
+      });
     }
   }
 
-  // Fallback if education not cleanly parsed but degree keywords exist in text
   if (educationList.length === 0) {
     const degreeMatch = text.match(/(b\.tech|b\.e\.|bachelor of [a-zA-Z\s]+|master of [a-zA-Z\s]+|diploma in [a-zA-Z\s]+)/i);
     if (degreeMatch) {
@@ -561,34 +633,63 @@ function performDeterministicAnalysis(rawText) {
     }
   }
 
-  // Extract Projects
+  // Extract Projects (supports numbered items e.g. 1.AI Health Chatbot)
   const projectsList = [];
   if (projectsText) {
     const pLines = projectsText.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
     let currentProj = null;
 
     for (const pl of pLines) {
-      const isBullet = /^[•\-\*\u2022\u25E6]|\d+\.\s/.test(pl);
-      if (!isBullet && pl.length < 140) {
+      const isNumberedOrHeader =
+        /^\d+\.\s*/.test(pl) ||
+        (!/^[•\-\*\u2022\u25E6]|\d+\.\s/.test(pl) && pl.length < 50 && !pl.includes("efficiently") && !pl.includes("monitoring"));
+
+      if (isNumberedOrHeader && pl.length < 75) {
         if (currentProj && currentProj.title) {
           projectsList.push(currentProj);
         }
-        const splitTitle = pl.split(/[|:-]/);
-        const titleName = splitTitle[0].trim();
-        const techInProj = allSkillsList.filter((s) => pl.toLowerCase().includes(s.toLowerCase()));
+        const cleanedTitle = pl.replace(/^\d+\.\s*/, "").trim();
+        const techInTitle = allSkillsList.filter((s) => {
+          if (s === "C") {
+            return /(?:^|[,\s:/])C(?:[,\s:/]|$)/.test(pl);
+          }
+          const escaped = s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          return new RegExp(`(?:^|[^a-zA-Z0-9_#+])${escaped}(?:$|[^a-zA-Z0-9_#+])`, "i").test(pl);
+        });
 
         currentProj = {
-          title: titleName,
-          description: pl,
-          technologies: techInProj,
+          title: cleanedTitle,
+          description: "",
+          technologies: techInTitle,
         };
       } else if (currentProj) {
-        const cleaned = pl.replace(/^[•\-\*\u2022\u25E6]\s*|\d+\.\s*/, "").trim();
-        currentProj.description += (currentProj.description ? " " : "") + cleaned;
-        const techInDesc = allSkillsList.filter(
-          (s) => pl.toLowerCase().includes(s.toLowerCase()) && !currentProj.technologies.includes(s)
-        );
-        currentProj.technologies.push(...techInDesc);
+        if (pl.includes("|")) {
+          const parts = pl.split("|").map((p) => p.trim());
+          currentProj.description += (currentProj.description ? " " : "") + parts[0];
+          if (parts[1]) {
+            const rawTechTokens = parts[1].split(/[,\s]+/).map((t) => t.trim());
+            for (const token of rawTechTokens) {
+              if (token.length > 1 && !currentProj.technologies.includes(token)) {
+                currentProj.technologies.push(token);
+              }
+            }
+          }
+        } else {
+          currentProj.description += (currentProj.description ? " " : "") + pl;
+        }
+
+        const techInDesc = allSkillsList.filter((s) => {
+          if (s === "C") {
+            return /(?:^|[,\s:/])C(?:[,\s:/]|$)/.test(pl);
+          }
+          const escaped = s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          return new RegExp(`(?:^|[^a-zA-Z0-9_#+])${escaped}(?:$|[^a-zA-Z0-9_#+])`, "i").test(pl);
+        });
+        for (const t of techInDesc) {
+          if (!currentProj.technologies.includes(t)) {
+            currentProj.technologies.push(t);
+          }
+        }
       }
     }
     if (currentProj && currentProj.title) {
@@ -596,8 +697,35 @@ function performDeterministicAnalysis(rawText) {
     }
   }
 
-  // Extract Experience
+  // Extract Experience and Internship
   const experienceList = [];
+
+  // Parse Internship section if present
+  if (internshipText) {
+    const intLines = internshipText.split("\n").map((l) => l.trim()).filter((l) => l.length > 3);
+    for (const il of intLines) {
+      if (il.includes("|")) {
+        const parts = il.split("|").map((p) => p.trim());
+        experienceList.push({
+          role: parts[0] ? `${parts[0]} Intern` : "Intern",
+          company: parts[1] || "Technology Organization",
+          duration: parts[2] || "Internship Period",
+          description: parts[3] || "Worked on technical projects and system developments.",
+          highlights: [parts[3] || "Practical internship delivery and technical implementation."],
+        });
+      } else {
+        experienceList.push({
+          role: "Technical Intern",
+          company: "Industry Internship",
+          duration: il.match(/\b(\d+\s*months?|20\d{2})\b/i)?.[0] || "Internship",
+          description: il,
+          highlights: [il],
+        });
+      }
+    }
+  }
+
+  // Parse Experience section if present
   if (experienceText) {
     const expLines = experienceText.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
     let currentExp = null;
@@ -630,7 +758,7 @@ function performDeterministicAnalysis(rawText) {
     if (currentExp) experienceList.push(currentExp);
   }
 
-  // If candidate is a fresher / entry level with no employment records, represent accurately:
+  // Default fresher foundation if no experience or internship
   if (experienceList.length === 0) {
     experienceList.push({
       role: "Academic & Personal Projects",
@@ -644,23 +772,35 @@ function performDeterministicAnalysis(rawText) {
     });
   }
 
-  // Extract Certifications & Achievements
+  // Extract Certifications
   const certificationsList = [];
   if (certsText) {
     const cLines = certsText.split("\n").map((l) => l.trim()).filter((l) => l.length > 3);
     for (const cl of cLines) {
-      certificationsList.push({
-        name: cl.replace(/^[•\-\*]\s*/, ""),
-        issuer: cl.includes("AWS") ? "Amazon Web Services" : cl.includes("Google") ? "Google" : "Certification Authority",
-        year: cl.match(/\b(20\d{2})\b/)?.[1] || "Completed",
-      });
+      const cleaned = cl.replace(/^\d+\.\s*/, "").replace(/^[•\-\*]\s*/, "");
+      if (cleaned.includes("|")) {
+        const parts = cleaned.split("|").map((p) => p.trim());
+        certificationsList.push({
+          name: parts[0],
+          issuer: parts[1] || "Certification Authority",
+          year: cleaned.match(/\b(20\d{2})\b/)?.[1] || "Completed",
+        });
+      } else {
+        certificationsList.push({
+          name: cleaned,
+          issuer: cleaned.includes("AWS") ? "Amazon Web Services" : cleaned.includes("Infosys") ? "Infosys Springboard" : "Certification Authority",
+          year: cleaned.match(/\b(20\d{2})\b/)?.[1] || "Completed",
+        });
+      }
     }
   }
 
+  // Extract Activities & Achievements (ignoring pagination lines)
   const achievementsList = [];
-  if (achievementsText) {
-    const aLines = achievementsText.split("\n").map((l) => l.trim()).filter((l) => l.length > 3);
+  if (activitiesText) {
+    const aLines = activitiesText.split("\n").map((l) => l.trim()).filter((l) => l.length > 3);
     for (const al of aLines) {
+      if (al.startsWith("--") || /page\s*\d+/i.test(al)) continue;
       achievementsList.push(al.replace(/^[•\-\*]\s*/, ""));
     }
   }
@@ -676,15 +816,12 @@ function performDeterministicAnalysis(rawText) {
       }
     }
 
-    // Calculate match percentage dynamically
     let matchScore = 0;
     if (matched.length > 0) {
-      // Score based on keyword count and breadth
-      const baseRatio = matched.length / Math.min(keywords.length, 7);
-      matchScore = Math.min(96, Math.round(55 + baseRatio * 40));
+      const baseRatio = matched.length / Math.min(keywords.length, 6);
+      matchScore = Math.min(96, Math.round(58 + baseRatio * 38));
     } else {
-      // No overlap
-      matchScore = 20;
+      matchScore = 25;
     }
 
     domainScoringResults.push({
@@ -694,7 +831,6 @@ function performDeterministicAnalysis(rawText) {
     });
   }
 
-  // Sort descending by match score
   domainScoringResults.sort((a, b) => b.matchScore - a.matchScore);
 
   const recommendedDomains = domainScoringResults.slice(0, 4).map((d, idx) => {
@@ -707,13 +843,13 @@ function performDeterministicAnalysis(rawText) {
     if (d.matchedKeywords.length > 0) {
       reason = `Demonstrated practical competency with ${matchedStr}, showing strong alignment with ${d.label} interview requirements.`;
     } else {
-      reason = `General assessment of core software engineering fundamentals and algorithmic problem solving.`;
+      reason = `Assessment of foundational programming principles and algorithmic problem solving.`;
     }
 
     return {
       label: d.label,
       matchScore: d.matchScore,
-      confidence: d.matchScore, // backwards compatibility
+      confidence: d.matchScore,
       priority,
       reason,
       matchedSkills: d.matchedKeywords.slice(0, 4),
@@ -723,46 +859,39 @@ function performDeterministicAnalysis(rawText) {
   // 6. Professional Summary
   const topDomain = recommendedDomains[0]?.label || "Software Engineering";
   const primarySkillsStr = allSkillsList.slice(0, 5).join(", ") || "modern programming tools";
-  const summary = `${candidateName ? candidateName + " is a" : "Candidate is an"} ambitious ${candidateLevel.toLowerCase()} with a primary focus in ${topDomain}. Possesses hands-on technical proficiency in ${primarySkillsStr}. Demonstrates strong engineering fundamentals, structured project development experience, and solid readiness for technical interview evaluations.`;
+  const summary = `${candidateName ? candidateName + " is an" : "Candidate is an"} ambitious ${candidateLevel.toLowerCase()} with a primary focus in ${topDomain}. Possesses hands-on technical proficiency in ${primarySkillsStr}. Demonstrates strong engineering fundamentals, structured project development experience, and solid readiness for technical interview evaluations.`;
 
   // 7. Dynamic Strengths & Areas for Improvement
   const strengths = [];
-  if (categorizedSkills.frontend.length >= 2) {
-    strengths.push(`Solid frontend engineering proficiency utilizing modern UI technologies (${categorizedSkills.frontend.slice(0, 3).join(", ")}).`);
-  }
-  if (categorizedSkills.backend.length >= 2) {
-    strengths.push(`Hands-on backend service development experience with ${categorizedSkills.backend.slice(0, 3).join(", ")}.`);
+  if (categorizedSkills.languages.length >= 2) {
+    strengths.push(`Versatile multi-language foundation with proficiency in ${categorizedSkills.languages.slice(0, 3).join(", ")}.`);
   }
   if (categorizedSkills.databases.length >= 1) {
-    strengths.push(`Practical database schema modeling and persistence management with ${categorizedSkills.databases.slice(0, 2).join(", ")}.`);
+    strengths.push(`Practical database schema modeling and data persistence management using ${categorizedSkills.databases.slice(0, 2).join(", ")}.`);
   }
   if (projectsList.length >= 2) {
-    strengths.push(`Demonstrated initiative through multiple technical project implementations highlighting end-to-end development skills.`);
+    strengths.push(`Demonstrated hands-on software development through ${projectsList.length} distinct project implementations.`);
   }
-  if (categorizedSkills.cloudDevOps.length >= 1) {
-    strengths.push(`Experience with modern deployment and cloud workflows (${categorizedSkills.cloudDevOps.slice(0, 2).join(", ")}).`);
+  if (experienceList.some((e) => e.role.toLowerCase().includes("intern"))) {
+    strengths.push(`Real-world industry exposure via practical software internship experience.`);
   }
   if (strengths.length < 3) {
-    strengths.push("Clear presentation of technical competencies and academic coursework.");
+    strengths.push("Clear presentation of academic excellence, coding practice, and problem solving.");
   }
 
-  // Areas for Improvement
   const improvements = [];
-  const hasMetrics = /\b(\d+%\s*(?:increase|reduction|growth|improvement)|\d+k?\s*(?:users|requests|downloads))\b/i.test(text);
+  const hasMetrics = /\b(\d+%\s*(?:accuracy|increase|reduction|growth|improvement)|\d+k?\s*(?:users|requests|downloads))\b/i.test(text);
   if (!hasMetrics) {
-    improvements.push("Incorporate quantifiable impact and business metrics (e.g., '% performance improvement', 'users served') in project descriptions.");
-  }
-  if (!githubMatch) {
-    improvements.push("Add direct GitHub repository links to projects to allow technical interviewers to review your clean code and commit history.");
+    improvements.push("Incorporate quantifiable impact and business metrics (e.g., '% performance improvement', 'users served') in all project descriptions.");
   }
   if (categorizedSkills.cloudDevOps.length === 0) {
-    improvements.push("Broaden cloud and containerization skills (e.g., Docker, AWS, CI/CD pipelines) to strengthen full-stack deployability.");
+    improvements.push("Broaden cloud deployment and containerization skills (e.g., Docker, AWS, CI/CD pipelines) to strengthen full-stack deployability.");
   }
   if (!text.toLowerCase().includes("test") && !text.toLowerCase().includes("jest") && !text.toLowerCase().includes("pytest")) {
     improvements.push("Highlight unit testing and automated quality assurance practices (e.g., Jest, PyTest, TDD) to signal production readiness.");
   }
   if (improvements.length < 3) {
-    improvements.push("Provide deeper technical explanations for key architectural decisions and problem-solving techniques in projects.");
+    improvements.push("Provide deeper technical explanations for architectural patterns and data flow mechanisms in projects.");
   }
 
   // 8. Missing Information Checklist
@@ -775,16 +904,16 @@ function performDeterministicAnalysis(rawText) {
 
   // 9. Resume Quality & ATS Score
   let contactScore = 0;
-  if (candidateName) contactScore += 25;
+  if (candidateName && candidateName !== "Candidate") contactScore += 25;
   if (emailMatch) contactScore += 30;
   if (phoneMatch) contactScore += 25;
   if (linkedinMatch || githubMatch) contactScore += 20;
 
-  const skillsScore = Math.min(100, Math.max(30, allSkillsList.length * 8));
+  const skillsScore = Math.min(100, Math.max(30, allSkillsList.length * 10));
   const projExpScore = Math.min(100, (projectsList.length + experienceList.length) * 25);
-  const impactScore = hasMetrics ? 85 : 45;
-  const structureScore = Math.min(100, sectionPositions.length * 20);
-  const readabilityScore = text.length > 400 && text.length < 4500 ? 90 : 70;
+  const impactScore = hasMetrics ? 85 : 55;
+  const structureScore = Math.min(100, Math.max(60, sectionPositions.length * 15));
+  const readabilityScore = text.length > 200 && text.length < 4500 ? 90 : 70;
 
   const overallScore = Math.round(
     contactScore * 0.15 +
@@ -800,21 +929,21 @@ function performDeterministicAnalysis(rawText) {
   else if (overallScore < 60) rating = "Needs Improvement";
 
   const qualityTips = [];
-  if (impactScore < 60) qualityTips.push("Add quantifiable results (e.g. reduced load time by 30%, served 500+ daily active users).");
+  if (impactScore < 70) qualityTips.push("Add quantifiable metrics to project outcomes (e.g. 90% accuracy, users served).");
   if (!githubMatch) qualityTips.push("Include a link to your public GitHub profile to showcase code quality.");
-  if (skillsScore < 70) qualityTips.push("Group and expand technical skills into clear categories (Languages, Frameworks, Databases, Tools).");
-  if (qualityTips.length === 0) qualityTips.push("Maintain updated project links and keep tech stacks aligned with modern industry standards.");
+  if (categorizedSkills.cloudDevOps.length === 0) qualityTips.push("Learn and feature containerization tools like Docker to stand out in technical screenings.");
+  if (qualityTips.length === 0) qualityTips.push("Keep project descriptions concise with clear action verbs and measurable results.");
 
   return {
     candidate: {
       name: candidateName || "Candidate",
-      title: detectedTitle || "Software Engineer",
+      title: detectedTitle || "Aspiring Software Engineer",
       email: emailMatch ? emailMatch[0] : "",
       phone: phoneMatch ? phoneMatch[0] : "",
       linkedin: linkedinMatch ? linkedinMatch[0] : "",
       github: githubMatch ? githubMatch[0] : "",
       portfolio: portfolioMatch ? portfolioMatch[0] : "",
-      location: "",
+      location: text.includes("India") ? "India" : "",
     },
     candidateLevel: {
       level: candidateLevel,
@@ -874,7 +1003,7 @@ const analyzeResume = async (req, res) => {
       });
     }
 
-    // Validate if the document is a genuine resume
+    // Validate if document is a genuine resume
     const isValid = validateResumeText(resumeText);
     if (!isValid) {
       return res.status(400).json({
@@ -904,7 +1033,7 @@ ${truncated}
 Rules:
 1. All analysis must be 100% grounded strictly in the provided resume text.
 2. DO NOT invent fake companies, fake years of experience, or skills not present.
-3. If the candidate is a student or fresh graduate, candidateLevel.level MUST be "Fresher / Entry Level". DO NOT classify students as Senior.
+3. If the candidate is a student, intern, or fresh graduate, candidateLevel.level MUST be "Fresher / Entry Level". DO NOT classify students as Senior.
 4. Categorize skills ONLY if they appear in the resume.
 5. In recommendedDomains, recommend the best-fitting domains from the available domains list, calculate genuine match scores (0-100), assign priority ("High", "Medium", "Low"), and cite specific skills as evidence.
 
@@ -935,7 +1064,7 @@ JSON Schema:
   },
   "experience": [
     {
-      "role": "Job Title",
+      "role": "Job Title or Internship",
       "company": "Company Name",
       "duration": "Dates/Duration",
       "description": "Responsibilities",
@@ -946,7 +1075,8 @@ JSON Schema:
     {
       "degree": "Degree / Field",
       "institution": "University / College",
-      "year": "Graduation Year"
+      "year": "Graduation Year",
+      "gpa": "CGPA/GPA if present"
     }
   ],
   "projects": [
@@ -1003,7 +1133,6 @@ JSON Schema:
         const parsed = JSON.parse(raw);
 
         if (parsed && parsed.recommendedDomains && Array.isArray(parsed.recommendedDomains)) {
-          // Normalize domains and backward compatibility
           parsed.recommendedDomains = parsed.recommendedDomains.filter((d) =>
             DOMAINS.includes(d.label)
           );
@@ -1045,4 +1174,5 @@ module.exports = {
   analyzeResume,
   validateResumeText,
   performDeterministicAnalysis,
+  extractTextFromFile,
 };
