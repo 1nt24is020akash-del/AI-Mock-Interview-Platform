@@ -1,8 +1,10 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User.js");
 
+const JWT_SECRET = process.env.JWT_SECRET || "ai_mock_interview_super_secret_jwt_key_2026";
+
 const signToken = (userId) =>
-  jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: "7d" });
+  jwt.sign({ userId }, JWT_SECRET, { expiresIn: "7d" });
 
 const register = async (req, res) => {
   try {

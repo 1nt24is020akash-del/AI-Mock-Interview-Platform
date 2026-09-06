@@ -9,7 +9,8 @@ const protect = (req, res, next) => {
 
   try {
     const token = header.split(' ')[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const jwtSecret = process.env.JWT_SECRET || 'ai_mock_interview_super_secret_jwt_key_2026';
+    const decoded = jwt.verify(token, jwtSecret);
     req.userId = decoded.userId;
     next();
   } catch (err) {
