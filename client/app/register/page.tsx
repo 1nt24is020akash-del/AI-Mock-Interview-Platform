@@ -23,11 +23,23 @@ const page = () => {
     e.preventDefault();
 
     setError("");
+    if (!formData.name.trim() || !formData.email.trim() || !formData.password) {
+      setError("Please fill in all fields.");
+      return;
+    }
+    if (formData.password.length < 6) {
+      setError("Password must be at least 6 characters.");
+      return;
+    }
+
     try {
-      await register(formData.name, formData.email, formData.password);
+      await register(formData.name.trim(), formData.email.trim(), formData.password);
     } catch (err: any) {
       setError(
-        err?.response?.data?.message || "Failed to create account. Please try again."
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        err?.message ||
+        "Failed to create account. Please try again."
       );
     }
   };

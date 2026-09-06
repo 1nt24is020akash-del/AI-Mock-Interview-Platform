@@ -13,11 +13,20 @@ const register = async (req, res) => {
     if (!name || !email || !password)
       return res.status(400).json({ message: "All fields are required" });
 
-    const exists = await User.findOne({ email });
-    if (exists)
-      return res.status(409).json({ message: "Email already in use" });
+    if (password.length < 6)
+      return res.status(400).json({ message: "Password must be at least 6 characters" });
 
-    const user = await User.create({ name, email, password });
+    const normalizedEmail = (email || "").trim().toLowerCase();
+
+    const exists = await User.findOne({ email: normalizedEmail });
+    if (exists)
+      return res.status(409).json({ message: "Email already in use. Please sign in instead." });
+
+    const user = await User.create({
+      name: name.trim(),
+      email: normalizedEmail,
+      password,
+    });
     const token = signToken(user._id.toString());
 
     res.status(201).json({
@@ -25,7 +34,15 @@ const register = async (req, res) => {
       user: { id: user._id, name: user.name, email: user.email },
     });
   } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
+    console.error("Register error:", err);
+    if (err.name === "ValidationError") {
+      const messages = Object.values(err.errors || {}).map((e) => e.message);
+      return res.status(400).json({ message: messages[0] || "Validation failed" });
+    }
+    if (err.code === 11000) {
+      return res.status(409).json({ message: "Email already in use. Please sign in instead." });
+    }
+    res.status(500).json({ message: err.message || "Registration failed" });
   }
 };
 
@@ -33,9 +50,14 @@ const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const user = await User.findOne({ email });
+    if (!email || !password)
+      return res.status(400).json({ message: "Email and password are required" });
+
+    const normalizedEmail = (email || "").trim().toLowerCase();
+
+    const user = await User.findOne({ email: normalizedEmail });
     if (!user || !(await user.comparePassword(password)))
-      return res.status(401).json({ message: "Invalid credentials" });
+      return res.status(401).json({ message: "Invalid email or password" });
 
     const token = signToken(user._id.toString());
 
@@ -44,7 +66,8 @@ const login = async (req, res) => {
       user: { id: user._id, name: user.name, email: user.email },
     });
   } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
+    console.error("Login error:", err);
+    res.status(500).json({ message: err.message || "Login failed" });
   }
 };
 

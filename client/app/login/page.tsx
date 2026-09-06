@@ -21,11 +21,18 @@ const page = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    if (!formData.email.trim() || !formData.password) {
+      setError("Please enter both email and password.");
+      return;
+    }
     try {
-      await login(formData.email, formData.password);
+      await login(formData.email.trim(), formData.password);
     } catch (err: any) {
       setError(
-        err?.response?.data?.message || "Invalid email or password. Please try again."
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        err?.message ||
+        "Invalid email or password. Please try again."
       );
     }
   };
