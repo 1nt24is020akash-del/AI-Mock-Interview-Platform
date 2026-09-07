@@ -173,7 +173,8 @@ const InterviewContent = () => {
         ]);
 
         if (data.isComplete || newCount >= TOTAL_QUESTIONS) {
-          setInterviewScore(data.score || 75);
+          const finalScore = typeof data.score === "number" ? data.score : 0;
+          setInterviewScore(finalScore);
           setIsInterviewComplete(true);
         } else if (data.nextQuestion) {
           setTimeout(() => {
@@ -220,10 +221,15 @@ const InterviewContent = () => {
             text: "Good effort! A few more sessions will get you there 💪",
             color: "text-blue-600 dark:text-blue-400",
           }
-        : {
-            text: "Keep practicing! Every session makes you stronger 🌟",
-            color: "text-orange-600 dark:text-orange-400",
-          };
+        : score >= 40
+          ? {
+              text: "Keep practicing! Every session makes you stronger 🌟",
+              color: "text-orange-600 dark:text-orange-400",
+            }
+          : {
+              text: "Needs significant practice. Review core technical concepts and try again 📚",
+              color: "text-rose-600 dark:text-rose-400",
+            };
   return (
     
     <div className="min-h-screen bg-background flex flex-col">
@@ -337,7 +343,9 @@ const InterviewContent = () => {
             <div className="w-full max-w-lg space-y-5">
               {/* Score card */}
               <Card className="p-8 border border-border/60 text-center">
-                <div className="text-3xl mb-3">🎉</div>
+                <div className="text-3xl mb-3">
+                  {score >= 60 ? "🎉" : score >= 40 ? "💪" : "📚"}
+                </div>
                 <h2 className="text-2xl font-black text-foreground mb-1">
                   Interview Complete!
                 </h2>
@@ -395,15 +403,15 @@ const InterviewContent = () => {
                 {[
                   {
                     label: "Technical Accuracy",
-                    pct: Math.min(score + 5, 100),
+                    pct: score === 0 ? 0 : Math.min(score + 5, 100),
                   },
                   {
                     label: "Communication Clarity",
-                    pct: Math.max(score - 8, 0),
+                    pct: score === 0 ? 0 : Math.max(score - 8, 0),
                   },
                   {
                     label: "Problem-Solving Approach",
-                    pct: Math.min(score + 2, 100),
+                    pct: score === 0 ? 0 : Math.min(score + 2, 100),
                   },
                 ].map((bar, i) => (
                   <div key={i} className="mb-3 last:mb-0">
@@ -519,7 +527,14 @@ function ScoreRing({ score }: { score: number }) {
   const radius = 54;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (score / 100) * circumference;
-  const color = score >= 80 ? "#22c55e" : score >= 60 ? "#3b82f6" : "#f97316";
+  const color =
+    score >= 80
+      ? "#22c55e"
+      : score >= 60
+        ? "#3b82f6"
+        : score >= 40
+          ? "#f97316"
+          : "#ef4444";
 
   return (
     <div className="relative w-40 h-40 mx-auto">
