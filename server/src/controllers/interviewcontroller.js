@@ -190,22 +190,152 @@ Ask one clear, specific technical question strictly matching the ${difficulty} d
 Return ONLY the question, nothing else.
 `.trim();
 
+// Validate answer to filter out spam, keyboard mashing, repeated characters, greetings, and non-answers
+function validateAnswer(answer, currentQuestion = "") {
+  const trimmed = (answer || "").trim();
+  if (!trimmed) {
+    return {
+      isValid: false,
+      reason: "empty",
+      feedback: "Your response does not provide a meaningful answer to the question. Please provide a relevant technical explanation.",
+    };
+  }
+
+  const cleanLetters = trimmed.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (cleanLetters.length === 0) {
+    return {
+      isValid: false,
+      reason: "symbols_only",
+      feedback: "Your response does not address the question. Please provide a relevant technical explanation.",
+    };
+  }
+
+  // 1. Single character spam (3+ identical characters consecutively, e.g., "UUUUU", "AAAAAAA")
+  if (/(.)\1{2,}/i.test(trimmed)) {
+    return {
+      isValid: false,
+      reason: "repeated_characters",
+      feedback: "Your response does not address the question. Please provide a relevant technical explanation.",
+    };
+  }
+
+  // 2. Periodic short pattern repetition (e.g., "HIHIHIHI", "hahahaha", "abcabcabc")
+  if (cleanLetters.length >= 4) {
+    for (let len = 1; len <= 4; len++) {
+      const unit = cleanLetters.slice(0, len);
+      const repeated = unit.repeat(Math.ceil(cleanLetters.length / len)).slice(0, cleanLetters.length);
+      if (repeated === cleanLetters && cleanLetters.length >= len * 2) {
+        return {
+          isValid: false,
+          reason: "repeated_pattern",
+          feedback: "Your response does not address the question. Please provide a relevant technical explanation.",
+        };
+      }
+    }
+  }
+
+  // 3. Low character diversity / entropy (e.g. length >= 5 with <= 2 unique letters like "HIHIHI", "hi hi hi")
+  const uniqueLetters = new Set(cleanLetters.split(""));
+  if (cleanLetters.length >= 5 && uniqueLetters.size <= 2) {
+    return {
+      isValid: false,
+      reason: "low_diversity",
+      feedback: "Your response does not address the question. Please provide a relevant technical explanation.",
+    };
+  }
+
+  // 4. Keyboard row mashing (e.g., "asdfghjkl", "qwertyuiop", "zxcvbnm")
+  const KEYBOARD_SEQUENCES = [
+    "qwertyuiop",
+    "asdfghjkl",
+    "zxcvbnm",
+    "poiuytrewq",
+    "lkjhgfdsa",
+    "mnbvcxz",
+    "1234567890",
+  ];
+  for (const seq of KEYBOARD_SEQUENCES) {
+    for (let start = 0; start <= seq.length - 4; start++) {
+      const sub = seq.substring(start, start + 4);
+      if (cleanLetters.includes(sub) && cleanLetters.length <= 15) {
+        return {
+          isValid: false,
+          reason: "keyboard_mash",
+          feedback: "Your response does not address the question. Please provide a relevant technical explanation.",
+        };
+      }
+    }
+  }
+
+  // 5. Consonant clusters without vowels in words of 5+ characters (e.g., "dfghjkl", "qwrtyp")
+  const words = trimmed.toLowerCase().split(/\s+/).map(w => w.replace(/[^a-z]/g, "")).filter(Boolean);
+  for (const w of words) {
+    if (w.length >= 5 && !/[aeiouy]/.test(w)) {
+      return {
+        isValid: false,
+        reason: "consonant_cluster",
+        feedback: "Your response does not address the question. Please provide a relevant technical explanation.",
+      };
+    }
+  }
+
+  // 6. Repeated identical words (e.g., "test test test", "hello hello hello")
+  if (words.length >= 2) {
+    const uniqueWords = new Set(words);
+    if (uniqueWords.size === 1) {
+      return {
+        isValid: false,
+        reason: "repeated_words",
+        feedback: "Your response does not address the question. Please provide a relevant technical explanation.",
+      };
+    }
+  }
+
+  // 7. Non-answers and conversational greetings only
+  const GREETINGS_AND_NON_ANSWERS = new Set([
+    "hi", "hello", "hey", "hola", "sup", "yo", "good morning", "good afternoon",
+    "good evening", "how are you", "test", "testing", "ok", "okay", "yes", "no",
+    "idk", "i dont know", "i don't know", "no idea", "dunno", "not sure",
+    "pass", "skip", "next", "bye", "who are you", "what", "why", "help"
+  ]);
+  const normalizedPhrase = words.join(" ");
+  if (GREETINGS_AND_NON_ANSWERS.has(normalizedPhrase)) {
+    return {
+      isValid: false,
+      reason: "greeting_or_non_answer",
+      feedback: "Your response does not address the question. Please provide a relevant technical explanation.",
+    };
+  }
+
+  return { isValid: true };
+}
+
 // Smart evaluation fallback if Groq is unavailable
 function generateSmartFeedback(answer, domain, questionIndex) {
+  const validation = validateAnswer(answer);
+  if (!validation.isValid) {
+    return {
+      isValid: false,
+      feedback: validation.feedback,
+      score: 0,
+    };
+  }
+
   const trimmed = (answer || "").trim();
-  const words = trimmed ? trimmed.split(/\s+/) : [];
+  const words = trimmed.split(/\s+/).filter(Boolean);
   const wordCount = words.length;
 
   let feedback = "";
-  let score = 70;
+  let score = 65;
 
-  if (wordCount < 10) {
-    feedback = `Your answer is very brief. While you touched on the topic, an interviewer in a ${domain} role expects deeper technical explanation, concrete examples, and proper domain terminology.`;
-    score = 42; // WEAK (< 50)
+  if (wordCount < 7) {
+    // Valid but very concise response (e.g. "Containers share the host kernel.")
+    feedback = `Your response touches on a relevant technical point, but is very brief. Elaborate further with architectural details, mechanisms, and practical examples to strengthen your answer.`;
+    score = 45; // WEAK (< 50)
   } else if (wordCount < 25) {
-    feedback = `Good start. You understand the basic concept, but you could strengthen your response by elaborating on edge cases, performance considerations, and real-world usage.`;
+    feedback = `Good start. You understand the basic concept, but you could strengthen your response by elaborating on edge cases, performance considerations, and practical usage.`;
     score = 68; // AVERAGE (50 to 79)
-  } else if (wordCount < 60) {
+  } else if (wordCount < 55) {
     feedback = `Solid answer! You explained the core concepts clearly with relevant technical context. Demonstrating structured communication and problem-solving reasoning made your answer stand out.`;
     score = 84; // STRONG (>= 80)
   } else {
@@ -213,7 +343,7 @@ function generateSmartFeedback(answer, domain, questionIndex) {
     score = 94; // STRONG (>= 80)
   }
 
-  return { feedback, score };
+  return { isValid: true, feedback, score };
 }
 
 // ── Start Interview ───────────────────────────────────────
@@ -309,25 +439,155 @@ const submitAnswer = async (req, res) => {
     const apiKey = process.env.GROQ_API_KEY;
     const canUseGroq = apiKey && !apiKey.includes("placeholder") && apiKey.startsWith("gsk_");
 
+    // Retrieve the current question being answered from conversation history
+    let currentQuestion = "";
+    if (interview.messages && interview.messages.length > 0) {
+      for (let i = interview.messages.length - 1; i >= 0; i--) {
+        if (interview.messages[i].role === "ai" && interview.messages[i].content) {
+          currentQuestion = interview.messages[i].content;
+          break;
+        }
+      }
+    }
+
+    // ── STEP 1: VALIDATE ANSWER BEFORE TECHNICAL EVALUATION ──
+    const validation = validateAnswer(answer, currentQuestion);
+
+    // If answer is invalid (spam, keyboard mashing, repeated characters, greetings, or non-answers):
+    if (!validation.isValid) {
+      const invalidScore = 0;
+      const invalidPerformance = "WEAK";
+      const invalidFeedback = validation.feedback || "Your response does not address the question. Please provide a relevant technical explanation.";
+      const nextDifficulty = calculateNextDifficulty(currentDifficulty, invalidPerformance);
+
+      let nextQ = "";
+      if (!isComplete) {
+        if (canUseGroq) {
+          try {
+            const groq = new Groq({ apiKey });
+            const nextQResponse = await groq.chat.completions.create({
+              model: "llama-3.3-70b-versatile",
+              messages: [
+                {
+                  role: "system",
+                  content: systemPrompt(domain, nextDifficulty),
+                },
+                {
+                  role: "user",
+                  content: `The candidate gave an invalid or non-answer to the previous question.
+The interview difficulty has adapted down to: ${nextDifficulty}.
+Ask the NEXT technical question strictly at ${nextDifficulty} difficulty for a ${domain} developer.
+Return ONLY the question, nothing else.`,
+                },
+              ],
+              temperature: 0.7,
+              max_tokens: 150,
+            });
+            nextQ = nextQResponse.choices[0]?.message?.content?.trim() || "";
+          } catch (groqErr) {
+            console.warn("Groq error on invalid answer transition, using question bank:", groqErr.message);
+          }
+        }
+
+        if (!nextQ) {
+          nextQ = getFallbackQuestion(domain, nextDifficulty, questionsAnswered + 1);
+        }
+      }
+
+      // Update Interview state in MongoDB
+      interview.currentDifficulty = nextDifficulty;
+      interview.questionsAnswered = questionsAnswered + 1;
+
+      if (!interview.difficultyHistory) {
+        interview.difficultyHistory = [];
+      }
+      interview.difficultyHistory.push({
+        questionIndex: questionsAnswered + 1,
+        difficulty: currentDifficulty,
+        score: invalidScore,
+        performance: invalidPerformance,
+        timestamp: new Date(),
+      });
+
+      interview.messages.push({
+        role: "user",
+        content: answer,
+        timestamp: new Date(),
+      });
+      interview.messages.push({
+        role: "ai",
+        content: invalidFeedback,
+        timestamp: new Date(),
+      });
+
+      if (isComplete) {
+        const validScores = interview.difficultyHistory
+          .map((h) => h.score)
+          .filter((s) => typeof s === "number");
+        const avgScore =
+          validScores.length > 0
+            ? Math.round(validScores.reduce((a, b) => a + b, 0) / validScores.length)
+            : 0;
+
+        interview.score = avgScore;
+        interview.isComplete = true;
+        interview.feedback = invalidFeedback;
+        const durationMin = Math.max(
+          1,
+          Math.round((Date.now() - new Date(interview.createdAt).getTime()) / 60000)
+        );
+        interview.duration = durationMin;
+
+        await interview.save();
+        return res.json({
+          feedback: invalidFeedback,
+          score: avgScore,
+          isComplete: true,
+          currentDifficulty: nextDifficulty,
+          previousDifficulty: currentDifficulty,
+          performance: invalidPerformance,
+          difficultyHistory: interview.difficultyHistory,
+        });
+      }
+
+      await interview.save();
+      return res.json({
+        feedback: invalidFeedback,
+        nextQuestion: nextQ,
+        isComplete: false,
+        currentDifficulty: nextDifficulty,
+        previousDifficulty: currentDifficulty,
+        performance: invalidPerformance,
+        score: invalidScore,
+        difficultyHistory: interview.difficultyHistory,
+      });
+    }
+
+    // ── STEP 2: TECHNICAL EVALUATION (FOR VALID ANSWERS) ──
     if (canUseGroq) {
       try {
         const groq = new Groq({ apiKey });
 
-        // 1. Evaluate answer and calculate score
         const evalResponse = await groq.chat.completions.create({
           model: "llama-3.3-70b-versatile",
           messages: [
             {
               role: "system",
               content: `You are an expert ${domain} interview evaluator.
-Evaluate candidate answers objectively for a question at ${currentDifficulty} difficulty level.
-Scoring benchmark:
-- 80-100: STRONG (accurate, detailed technical explanation, addresses nuances)
-- 50-79: AVERAGE (understands basic concept, mostly accurate, but lacks depth or misses key details)
-- 10-49: WEAK (incorrect, extremely shallow, missing core knowledge, or evasive)
+Evaluate candidate answers objectively for the question asked at ${currentDifficulty} difficulty level.
+
+Interview Question: "${currentQuestion}"
+
+Evaluation rules:
+1. First verify if the candidate made a genuine attempt to answer the question.
+2. If the response does NOT attempt to answer the question, or consists of greetings, random text, keyboard mashing, or unrelated content, classify as INVALID: {"isValid": false, "score": 0, "feedback": "Your response does not address the question. Please provide a relevant technical explanation."}.
+3. If the answer is valid:
+   - 80-100: STRONG (accurate, detailed technical explanation, addresses nuances and edge cases)
+   - 50-79: AVERAGE (understands basic concept, mostly accurate, but lacks depth or misses key details)
+   - 10-49: WEAK (valid attempt but incorrect, extremely shallow, or missing core principles)
 
 Return strictly valid JSON with no markdown formatting:
-{"feedback": "2-3 sentences of constructive feedback", "score": 85}`,
+{"isValid": true, "feedback": "2-3 sentences of constructive feedback", "score": 85}`,
             },
             {
               role: "user",
@@ -341,14 +601,19 @@ Return strictly valid JSON with no markdown formatting:
         const evalContent = evalResponse.choices[0]?.message?.content?.trim() || "";
         try {
           const parsed = JSON.parse(evalContent.replace(/```json|```/g, "").trim());
-          if (parsed.feedback) feedback = parsed.feedback;
-          if (typeof parsed.score === "number") {
-            score = Math.max(10, Math.min(100, Math.round(parsed.score)));
+          if (parsed.isValid === false || parsed.score === 0) {
+            feedback = parsed.feedback || "Your response does not address the question. Please provide a relevant technical explanation.";
+            score = 0;
+          } else {
+            if (parsed.feedback) feedback = parsed.feedback;
+            if (typeof parsed.score === "number") {
+              score = Math.max(0, Math.min(100, Math.round(parsed.score)));
+            }
           }
         } catch (parseErr) {
-          const scoreMatch = evalContent.match(/"score"\s*:\s*(\d+)/i) || evalContent.match(/\b(\d{2,3})\b/);
+          const scoreMatch = evalContent.match(/"score"\s*:\s*(\d+)/i) || evalContent.match(/\b(\d{1,3})\b/);
           if (scoreMatch) {
-            score = Math.max(10, Math.min(100, parseInt(scoreMatch[1])));
+            score = Math.max(0, Math.min(100, parseInt(scoreMatch[1])));
           }
           feedback = evalContent.replace(/"score".*$/, "").replace(/[{}\"]/g, "").trim();
         }
@@ -530,6 +795,7 @@ module.exports = {
   submitAnswer,
   getInterviews,
   getInterview,
+  validateAnswer,
   calculateNextDifficulty,
   classifyPerformance,
   getFallbackQuestion,
