@@ -13,6 +13,20 @@ const InterviewSchema = new mongoose.Schema({
   duration: { type: Number, default: 0 }, // minutes
   questionsAnswered: { type: Number, default: 0 },
   messages: [MessageSchema],
+  currentDifficulty: {
+    type: String,
+    enum: ["EASY", "MEDIUM", "HARD"],
+    default: "MEDIUM",
+  },
+  difficultyHistory: [
+    {
+      questionIndex: { type: Number },
+      difficulty: { type: String, enum: ["EASY", "MEDIUM", "HARD"] },
+      score: { type: Number },
+      performance: { type: String, enum: ["STRONG", "AVERAGE", "WEAK"] },
+      timestamp: { type: Date, default: Date.now },
+    },
+  ],
   feedback: { type: String, default: "" },
   isComplete: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now },

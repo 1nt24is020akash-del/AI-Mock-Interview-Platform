@@ -1,5 +1,9 @@
 "use client";
-import ChatContainer from "@/components/ChatContainer";
+import ChatContainer, {
+  DifficultyLevel,
+  Message,
+  PerformanceLevel,
+} from "@/components/ChatContainer";
 import { InputBox } from "@/components/InputBox";
 
 import { Button } from "@/components/ui/button";
@@ -8,12 +12,7 @@ import { useAuth } from "@/hooks/useAuth";
 import axiosInstance from "@/lib/axios";
 import { useRouter, useSearchParams } from "next/navigation";
 import React, { useEffect, useState } from "react";
-interface Message {
-  id: string;
-  content: string;
-  isUser: boolean;
-  timestamp: Date;
-}
+
 interface InterviewSession {
   id: string;
   score?: number;
@@ -34,6 +33,28 @@ const domainEmoji: Record<string, string> = {
   "Database Design": "🗄️",
   General: "🎯",
 };
+
+const difficultyBadgeConfig: Record<
+  DifficultyLevel,
+  { label: string; icon: string; style: string }
+> = {
+  EASY: {
+    label: "Easy",
+    icon: "🟢",
+    style: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30",
+  },
+  MEDIUM: {
+    label: "Medium",
+    icon: "🟡",
+    style: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30",
+  },
+  HARD: {
+    label: "Hard",
+    icon: "🔴",
+    style: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30",
+  },
+};
+
 const InterviewContent = () => {
   const router = useRouter();
   const { isLoggedIn, isLoading: authLoading } = useAuth();
@@ -47,7 +68,12 @@ const InterviewContent = () => {
   const [questionsAnswered, setQuestionsAnswered] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [currentDifficulty, setCurrentDifficulty] = useState<DifficultyLevel>("MEDIUM");
+  const [difficultyProgression, setDifficultyProgression] = useState<
+    { questionIndex: number; difficulty: DifficultyLevel; performance?: PerformanceLevel }[]
+  >([{ questionIndex: 1, difficulty: "MEDIUM" }]);
   const [sessionStartTime] = useState(Date.now());
+
   useEffect(() => {
     if (!authLoading && !isLoggedIn) {
       router.push("/login");
@@ -63,6 +89,7 @@ const InterviewContent = () => {
     const t = setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
     return () => clearInterval(t);
   }, [isInterviewComplete]);
+
   const startInterview = async () => {
     try {
       setIsLoading(true);
@@ -72,12 +99,17 @@ const InterviewContent = () => {
       if (data) {
         setSessionId(data.sessionId);
         setQuestionsAnswered(0);
+        const startingDiff = (data.difficulty || "MEDIUM") as DifficultyLevel;
+        setCurrentDifficulty(startingDiff);
+        setDifficultyProgression([{ questionIndex: 1, difficulty: startingDiff }]);
         setMessages([
           {
             id: "1",
             content: data.question || "Tell me about yourself",
             isUser: false,
             timestamp: new Date(),
+            difficulty: startingDiff,
+            isQuestion: true,
           },
         ]);
       }
@@ -85,7 +117,7 @@ const InterviewContent = () => {
       setMessages([
         {
           id: "1",
-          content: "Connection error.Please check your network",
+          content: "Connection error. Please check your network",
           isUser: false,
           timestamp: new Date(),
         },
@@ -94,8 +126,10 @@ const InterviewContent = () => {
       setIsLoading(false);
     }
   };
+
   const formatTime = (s: number) =>
     `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+
   const handleSendMessage = async (userMessage: string) => {
     if (!userMessage.trim() || !sessionId) return;
     setMessages((prev) => [
@@ -116,6 +150,14 @@ const InterviewContent = () => {
       if (data) {
         const newCount = questionsAnswered + 1;
         setQuestionsAnswered(newCount);
+        const newDiff = (data.currentDifficulty || currentDifficulty) as DifficultyLevel;
+        const perf = data.performance as PerformanceLevel;
+        setCurrentDifficulty(newDiff);
+        setDifficultyProgression((prev) => [
+          ...prev,
+          { questionIndex: newCount + 1, difficulty: newDiff, performance: perf },
+        ]);
+
         setMessages((prev) => [
           ...prev,
           {
@@ -125,8 +167,11 @@ const InterviewContent = () => {
               "Good answer! Your response demonstrates solid understanding",
             isUser: false,
             timestamp: new Date(),
+            performance: perf,
+            isQuestion: false,
           },
         ]);
+
         if (data.isComplete || newCount >= TOTAL_QUESTIONS) {
           setInterviewScore(data.score || 75);
           setIsInterviewComplete(true);
@@ -139,6 +184,8 @@ const InterviewContent = () => {
                 content: data.nextQuestion,
                 isUser: false,
                 timestamp: new Date(),
+                difficulty: newDiff,
+                isQuestion: true,
               },
             ]);
           }, 500);
@@ -200,6 +247,16 @@ const InterviewContent = () => {
                       Live
                     </span>
                   )}
+                  {!isInterviewComplete && (
+                    <span
+                      className={`flex items-center gap-1.5 text-xs border px-2.5 py-0.5 rounded-full font-semibold transition-all duration-300 flex-shrink-0 ${
+                        difficultyBadgeConfig[currentDifficulty].style
+                      }`}
+                    >
+                      <span className="text-[10px]">{difficultyBadgeConfig[currentDifficulty].icon}</span>
+                      {difficultyBadgeConfig[currentDifficulty].label}
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground">
                   AI Mock Interview Session
@@ -244,12 +301,22 @@ const InterviewContent = () => {
             </div>
           </div>
           {!isInterviewComplete && (
-            <div className="sm:hidden mt-3">
-              <div className="flex items-center justify-between text-xs text-muted-foreground mb-1.5">
-                <span>
-                  Q{Math.min(questionsAnswered + 1, TOTAL_QUESTIONS)} of{" "}
-                  {TOTAL_QUESTIONS}
-                </span>
+            <div className="sm:hidden mt-3 space-y-1.5">
+              <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+                <div className="flex items-center gap-2">
+                  <span>
+                    Q{Math.min(questionsAnswered + 1, TOTAL_QUESTIONS)} of{" "}
+                    {TOTAL_QUESTIONS}
+                  </span>
+                  <span
+                    className={`inline-flex items-center gap-1 text-[10px] border px-2 py-0.5 rounded-full font-medium ${
+                      difficultyBadgeConfig[currentDifficulty].style
+                    }`}
+                  >
+                    <span>{difficultyBadgeConfig[currentDifficulty].icon}</span>
+                    {difficultyBadgeConfig[currentDifficulty].label}
+                  </span>
+                </div>
                 <span className="font-mono">{formatTime(elapsedSeconds)}</span>
               </div>
               <div className="h-1.5 bg-border rounded-full overflow-hidden">
@@ -286,9 +353,14 @@ const InterviewContent = () => {
               </Card>
 
               {/* Stats row */}
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {[
                   { label: "Questions", value: questionsAnswered, icon: "❓" },
+                  {
+                    label: "Final Level",
+                    value: currentDifficulty,
+                    icon: difficultyBadgeConfig[currentDifficulty].icon,
+                  },
                   {
                     label: "Domain",
                     value: domain.split("/")[0],
@@ -302,10 +374,10 @@ const InterviewContent = () => {
                 ].map((stat, i) => (
                   <Card
                     key={i}
-                    className="p-4 text-center border border-border/50"
+                    className="p-3.5 text-center border border-border/50"
                   >
-                    <div className="text-lg mb-1">{stat.icon}</div>
-                    <p className="text-base font-bold text-foreground">
+                    <div className="text-base mb-1">{stat.icon}</div>
+                    <p className="text-sm font-bold text-foreground">
                       {stat.value}
                     </p>
                     <p className="text-xs text-muted-foreground mt-0.5">
@@ -359,6 +431,8 @@ const InterviewContent = () => {
                     setIsInterviewComplete(false);
                     setInterviewScore(null);
                     setQuestionsAnswered(0);
+                    setCurrentDifficulty("MEDIUM");
+                    setDifficultyProgression([{ questionIndex: 1, difficulty: "MEDIUM" }]);
                     setMessages([]);
                     setElapsedSeconds(0);
                     startInterview();
