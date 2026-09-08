@@ -79,3 +79,41 @@ export interface InterviewMetrics {
   confidenceScore: number;
   clarityScore: number;
 }
+
+export type IntegrityEventType =
+  | "TAB_SWITCH"
+  | "WINDOW_BLUR"
+  | "FULLSCREEN_EXIT"
+  | "SCREEN_SHARE_STOPPED"
+  | "CAMERA_STOPPED"
+  | "MICROPHONE_STOPPED"
+  | "FACE_NOT_DETECTED"
+  | "MULTIPLE_FACES"
+  | "LOOKING_AWAY";
+
+export interface IntegrityEvent {
+  id: string;
+  type: IntegrityEventType;
+  timestamp: Date;
+  severity: "LOW" | "MEDIUM" | "HIGH";
+  message: string;
+}
+
+export interface IntegrityReport {
+  tabSwitches: number;
+  fullscreenExits: number;
+  faceNotDetectedCount: number;
+  multipleFacesCount: number;
+  attentionWarnings: number;
+  screenShareInterruptions: number;
+  integrityStatus: "VERIFIED" | "REVIEW_RECOMMENDED";
+  events: IntegrityEvent[];
+}
+
+export interface IntegrityWarning {
+  type: IntegrityEventType;
+  title: string;
+  message: string;
+  timestamp: number;
+}
+

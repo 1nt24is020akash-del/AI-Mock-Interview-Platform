@@ -766,6 +766,7 @@ const submitAnswer = async (req, res) => {
       domain = "General",
       questionsAnswered = 0,
       currentQuestion: clientCurrentQuestion,
+      integrityReport,
     } = req.body;
 
     if (!sessionId || !answer)
@@ -777,6 +778,10 @@ const submitAnswer = async (req, res) => {
     });
     if (!interview)
       return res.status(404).json({ message: "Session not found" });
+
+    if (integrityReport) {
+      interview.integrityReport = integrityReport;
+    }
 
     const currentDifficulty = interview.currentDifficulty || "MEDIUM";
     const isComplete = questionsAnswered >= 2; // Complete after 3 questions (0, 1, 2)
@@ -946,6 +951,7 @@ Return ONLY the question, nothing else.`,
           reasoning,
           isFollowUp: false,
           difficultyHistory: interview.difficultyHistory,
+          integrityReport: interview.integrityReport,
         });
       }
 
@@ -1195,6 +1201,7 @@ Return strictly valid JSON with no markdown fences:
         reasoning,
         isFollowUp: action === "FOLLOW_UP",
         difficultyHistory: interview.difficultyHistory,
+        integrityReport: interview.integrityReport,
       });
     }
 

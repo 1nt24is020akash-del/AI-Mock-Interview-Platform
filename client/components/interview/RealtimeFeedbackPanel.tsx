@@ -1,19 +1,43 @@
 "use client";
 
 import React from "react";
-import { DeviceStatus, InterviewMetrics } from "./types";
-import { CheckCircle2, XCircle, ShieldCheck, Activity, Brain, MessageSquare, Gauge } from "lucide-react";
+import { DeviceStatus, InterviewMetrics, IntegrityWarning } from "./types";
+import {
+  CheckCircle2,
+  XCircle,
+  ShieldCheck,
+  Activity,
+  Brain,
+  MessageSquare,
+  Gauge,
+  AlertTriangle,
+  Eye,
+  Maximize2,
+  Users,
+} from "lucide-react";
 
 interface RealtimeFeedbackPanelProps {
   metrics: InterviewMetrics;
   deviceStatus: DeviceStatus;
   domain: string;
+  isFaceDetected?: boolean;
+  isSinglePerson?: boolean;
+  isLookingAtScreen?: boolean;
+  isFullscreen?: boolean;
+  attentionWarnings?: number;
+  activeWarning?: IntegrityWarning | null;
 }
 
 export function RealtimeFeedbackPanel({
   metrics,
   deviceStatus,
   domain,
+  isFaceDetected = true,
+  isSinglePerson = true,
+  isLookingAtScreen = true,
+  isFullscreen = false,
+  attentionWarnings = 0,
+  activeWarning,
 }: RealtimeFeedbackPanelProps) {
   const metricBars = [
     {
@@ -87,46 +111,103 @@ export function RealtimeFeedbackPanel({
         })}
       </div>
 
-      {/* Device Verification Checklist */}
-      <div className="pt-2 border-t border-zinc-800/80">
-        <p className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-          Session Verification
-        </p>
-        <div className="grid grid-cols-3 gap-2">
-          {/* Camera Checklist */}
-          <div className="flex items-center gap-1.5 p-2 rounded-lg bg-zinc-950/60 border border-zinc-800 text-[11px]">
+      {/* Active Warning Banner (if triggered) */}
+      {activeWarning && (
+        <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-start gap-2 animate-in fade-in zoom-in-95 duration-200">
+          <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <p className="font-bold text-amber-200">{activeWarning.title}</p>
+            <p className="text-[11px] text-amber-300/90 leading-tight mt-0.5">
+              {activeWarning.message}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Interview Integrity Section */}
+      <div className="pt-2 border-t border-zinc-800/80 space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            Interview Integrity
+          </p>
+          {attentionWarnings > 0 && (
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+              {attentionWarnings} alert{attentionWarnings > 1 ? "s" : ""}
+            </span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 text-[11px]">
+          {/* Camera Active */}
+          <div className="flex items-center gap-1.5 p-2 rounded-lg bg-zinc-950/60 border border-zinc-800">
             {deviceStatus.cameraActive && !deviceStatus.isVideoOff ? (
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
             ) : (
-              <XCircle className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0" />
+              <XCircle className="w-3.5 h-3.5 text-rose-500 flex-shrink-0" />
             )}
-            <span className={deviceStatus.cameraActive && !deviceStatus.isVideoOff ? "text-zinc-200 font-medium" : "text-zinc-500"}>
-              Webcam
+            <span className={deviceStatus.cameraActive ? "text-zinc-200" : "text-rose-400 font-semibold"}>
+              Camera Active
             </span>
           </div>
 
-          {/* Mic Checklist */}
-          <div className="flex items-center gap-1.5 p-2 rounded-lg bg-zinc-950/60 border border-zinc-800 text-[11px]">
+          {/* Microphone Active */}
+          <div className="flex items-center gap-1.5 p-2 rounded-lg bg-zinc-950/60 border border-zinc-800">
             {deviceStatus.micActive && !deviceStatus.isMuted ? (
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
             ) : (
-              <XCircle className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0" />
+              <XCircle className="w-3.5 h-3.5 text-rose-500 flex-shrink-0" />
             )}
-            <span className={deviceStatus.micActive && !deviceStatus.isMuted ? "text-zinc-200 font-medium" : "text-zinc-500"}>
-              Microphone
+            <span className={deviceStatus.micActive ? "text-zinc-200" : "text-rose-400 font-semibold"}>
+              Mic Active
             </span>
           </div>
 
-          {/* Screen Share Checklist */}
-          <div className="flex items-center gap-1.5 p-2 rounded-lg bg-zinc-950/60 border border-zinc-800 text-[11px]">
+          {/* Screen Shared */}
+          <div className="flex items-center gap-1.5 p-2 rounded-lg bg-zinc-950/60 border border-zinc-800">
             {deviceStatus.screenShareActive ? (
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
             ) : (
-              <XCircle className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0" />
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
             )}
-            <span className={deviceStatus.screenShareActive ? "text-zinc-200 font-medium" : "text-zinc-500"}>
-              Screen
+            <span className={deviceStatus.screenShareActive ? "text-zinc-200" : "text-amber-400"}>
+              {deviceStatus.screenShareActive ? "Screen Shared" : "Screen Stopped"}
+            </span>
+          </div>
+
+          {/* Fullscreen Mode */}
+          <div className="flex items-center gap-1.5 p-2 rounded-lg bg-zinc-950/60 border border-zinc-800">
+            {isFullscreen ? (
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+            ) : (
+              <Maximize2 className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+            )}
+            <span className={isFullscreen ? "text-zinc-200" : "text-amber-400"}>
+              {isFullscreen ? "Fullscreen On" : "Fullscreen Off"}
+            </span>
+          </div>
+
+          {/* Candidate Detected */}
+          <div className="flex items-center gap-1.5 p-2 rounded-lg bg-zinc-950/60 border border-zinc-800">
+            {isFaceDetected ? (
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+            ) : (
+              <XCircle className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />
+            )}
+            <span className={isFaceDetected ? "text-zinc-200" : "text-rose-400"}>
+              {isFaceDetected ? "Face Visible" : "Face Not Visible"}
+            </span>
+          </div>
+
+          {/* Single Person Detected */}
+          <div className="flex items-center gap-1.5 p-2 rounded-lg bg-zinc-950/60 border border-zinc-800">
+            {isSinglePerson ? (
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+            ) : (
+              <Users className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />
+            )}
+            <span className={isSinglePerson ? "text-zinc-200" : "text-rose-400"}>
+              {isSinglePerson ? "Single Person" : "Multiple People"}
             </span>
           </div>
         </div>

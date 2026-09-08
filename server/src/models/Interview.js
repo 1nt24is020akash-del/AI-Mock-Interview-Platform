@@ -46,6 +46,23 @@ const InterviewSchema = new mongoose.Schema({
   ],
   feedback: { type: String, default: "" },
   isComplete: { type: Boolean, default: false },
+  integrityReport: {
+    tabSwitches: { type: Number, default: 0 },
+    fullscreenExits: { type: Number, default: 0 },
+    faceNotDetectedCount: { type: Number, default: 0 },
+    multipleFacesCount: { type: Number, default: 0 },
+    attentionWarnings: { type: Number, default: 0 },
+    screenShareInterruptions: { type: Number, default: 0 },
+    integrityStatus: { type: String, default: "VERIFIED" },
+    events: [
+      {
+        type: { type: String },
+        timestamp: { type: Date, default: Date.now },
+        severity: { type: String },
+        message: { type: String },
+      },
+    ],
+  },
   createdAt: { type: Date, default: Date.now },
 });
 

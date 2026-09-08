@@ -73,7 +73,19 @@ export function QuestionDisplayCard({
   const diffConfig = difficultyBadgeConfig[difficulty] || difficultyBadgeConfig.MEDIUM;
 
   return (
-    <div className="relative w-full rounded-2xl bg-zinc-900/90 border border-zinc-800 backdrop-blur-xl p-5 sm:p-6 shadow-2xl transition-all duration-300">
+    <div
+      onCopy={(e) => e.preventDefault()}
+      onCut={(e) => e.preventDefault()}
+      onContextMenu={(e) => e.preventDefault()}
+      onDragStart={(e) => e.preventDefault()}
+      className="relative w-full rounded-2xl bg-zinc-900/90 border border-zinc-800 backdrop-blur-xl p-5 sm:p-6 shadow-2xl transition-all duration-300 select-none cursor-default"
+      style={{
+        WebkitUserSelect: "none",
+        MozUserSelect: "none",
+        msUserSelect: "none",
+        userSelect: "none",
+      }}
+    >
       {/* Header Badges row */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3 pb-3 border-b border-zinc-800/80">
         <div className="flex flex-wrap items-center gap-2">
@@ -117,8 +129,8 @@ export function QuestionDisplayCard({
       </div>
 
       {/* Question Content */}
-      <div className="space-y-2">
-        <p className="text-base sm:text-lg md:text-xl font-medium text-zinc-100 leading-relaxed tracking-wide selection:bg-emerald-500/30">
+      <div className="space-y-2 pointer-events-none">
+        <p className="text-base sm:text-lg md:text-xl font-medium text-zinc-100 leading-relaxed tracking-wide select-none">
           {displayedText || questionText}
           {displayedText.length < questionText.length && (
             <span className="inline-block w-2 h-5 ml-1 bg-emerald-400 animate-pulse align-middle" />
