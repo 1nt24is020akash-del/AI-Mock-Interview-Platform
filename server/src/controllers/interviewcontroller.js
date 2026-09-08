@@ -360,8 +360,9 @@ function validateAnswer(answer, currentQuestion = "") {
     };
   }
 
-  // 1. Single character spam (3+ identical characters consecutively, e.g., "UUUUU", "AAAAAAA")
-  if (/(.)\1{2,}/i.test(trimmed)) {
+  // 1. Single character letter spam (4+ identical letters consecutively, e.g., "UUUU", "AAAAAAA", "hhhh")
+  // Note: Only targets letters so programming syntax like "===", spread operator "...", markdown, and numbers like "1000" are not blocked.
+  if (/([a-zA-Z])\1{3,}/i.test(trimmed)) {
     return {
       isValid: false,
       reason: "repeated_characters",
@@ -418,15 +419,23 @@ function validateAnswer(answer, currentQuestion = "") {
   }
 
   // 5. Consonant clusters without vowels in words of 5+ characters (e.g., "dfghjkl", "qwrtyp")
+  // Excludes standard technical terms/acronyms and only triggers on short non-answers or when majority of words are vowel-less
+  const TECHNICAL_WHITELIST = new Set([
+    "https", "chgrp", "pbkdf", "pstmt", "sysfs", "nginx", "mysql", "redis", "dmesg", "syslog", "cgroups", "kubectl", "crontab", "rsync"
+  ]);
   const words = trimmed.toLowerCase().split(/\s+/).map(w => w.replace(/[^a-z]/g, "")).filter(Boolean);
-  for (const w of words) {
-    if (w.length >= 5 && !/[aeiouy]/.test(w)) {
-      return {
-        isValid: false,
-        reason: "consonant_cluster",
-        feedback: "Your response does not address the question. Please provide a relevant technical explanation.",
-      };
-    }
+  const suspiciousClusterWords = words.filter(
+    (w) => w.length >= 5 && !/[aeiouy]/.test(w) && !TECHNICAL_WHITELIST.has(w)
+  );
+  if (
+    suspiciousClusterWords.length > 0 &&
+    (words.length <= 3 || suspiciousClusterWords.length > words.length * 0.3)
+  ) {
+    return {
+      isValid: false,
+      reason: "consonant_cluster",
+      feedback: "Your response does not address the question. Please provide a relevant technical explanation.",
+    };
   }
 
   // 6. Repeated identical words (e.g., "test test test", "hello hello hello")
@@ -460,15 +469,63 @@ function validateAnswer(answer, currentQuestion = "") {
   return { isValid: true };
 }
 
+const DOMAIN_KEYWORDS = {
+  "DevOps": new Set([
+    "docker", "container", "containers", "vm", "vms", "virtual", "machine", "machines",
+    "linux", "kernel", "cgroup", "cgroups", "namespace", "namespaces", "memory", "cpu",
+    "oom", "killer", "dmesg", "syslog", "stats", "process", "processes", "isolation",
+    "kubernetes", "k8s", "pod", "pods", "prometheus", "grafana", "monitoring", "nginx",
+    "deploy", "deployment", "ci", "cd", "pipeline", "cluster", "bridge", "veth", "sigkill",
+    "exit", "swap", "backpressure", "limits", "throttling", "ansible", "terraform", "helm"
+  ]),
+  "React": new Set([
+    "react", "component", "components", "state", "props", "hook", "hooks", "useeffect",
+    "usestate", "usememo", "usecallback", "render", "rendering", "dom", "vdom", "virtual",
+    "jsx", "redux", "context", "lifecycle", "ref", "memo", "reconciliation", "fiber"
+  ]),
+  "JavaScript/Node.js": new Set([
+    "javascript", "js", "node", "nodejs", "event", "loop", "promise", "promises", "async",
+    "await", "callback", "closure", "closures", "scope", "prototype", "prototypal", "v8",
+    "thread", "memory", "stream", "buffer", "express", "npm", "json", "module", "modules", "require"
+  ]),
+  "System Design": new Set([
+    "system", "architecture", "scale", "scaling", "scalability", "horizontal", "vertical",
+    "load", "balancer", "cache", "caching", "redis", "memcached", "cap", "latency",
+    "throughput", "distributed", "microservice", "microservices", "consistency", "partition",
+    "queue", "kafka", "message", "rabbitmq", "sharding", "replication", "availability"
+  ]),
+  "Database Design": new Set([
+    "sql", "database", "databases", "query", "queries", "table", "tables", "index",
+    "indexes", "indexing", "btree", "acid", "transaction", "transactions", "join", "joins",
+    "postgresql", "postgres", "mysql", "mongodb", "nosql", "schema", "normalization",
+    "foreign", "primary", "key", "sharding", "replica", "replication", "isolation", "deadlock"
+  ]),
+  "General": new Set([
+    "code", "software", "develop", "developer", "development", "engineering", "engineer",
+    "debug", "debugging", "test", "testing", "design", "architecture", "system", "project",
+    "performance", "error", "solution", "algorithm", "data", "structure", "clean", "refactor"
+  ]),
+};
+DOMAIN_KEYWORDS["JavaScript"] = DOMAIN_KEYWORDS["JavaScript/Node.js"];
+
+const QUESTION_STOPWORDS = new Set([
+  "what", "is", "are", "how", "why", "can", "you", "explain", "the", "to", "and", "of", "in",
+  "a", "an", "on", "for", "with", "do", "does", "if", "this", "that", "it", "its", "by", "or",
+  "between", "difference", "compare", "compared", "when", "where", "which", "should", "would",
+  "could", "me", "my", "your", "from", "at", "then", "into", "under", "over", "about", "tell",
+  "describe", "give", "example", "please", "using", "used", "like"
+]);
+
 // Smart evaluation fallback if Groq is unavailable
 function generateSmartFeedback(
   answer,
   domain = "General",
   currentDifficulty = "MEDIUM",
   questionIndex = 0,
-  consecutiveFollowUps = 0
+  consecutiveFollowUps = 0,
+  currentQuestion = ""
 ) {
-  const validation = validateAnswer(answer);
+  const validation = validateAnswer(answer, currentQuestion);
   if (!validation.isValid) {
     return {
       isValid: false,
@@ -492,6 +549,51 @@ function generateSmartFeedback(
   const trimmed = (answer || "").trim();
   const words = trimmed.split(/\s+/).filter(Boolean);
   const wordCount = words.length;
+
+  // Semantic keyword and topic relevance evaluation
+  const ansTokens = trimmed.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 2);
+  let qMatches = 0;
+  if (currentQuestion) {
+    const qTokens = currentQuestion
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w.length >= 3 && !QUESTION_STOPWORDS.has(w));
+    const qTokenSet = new Set(qTokens);
+    for (const token of ansTokens) {
+      if (qTokenSet.has(token)) qMatches++;
+    }
+  }
+
+  const domainKeywords = DOMAIN_KEYWORDS[domain] || DOMAIN_KEYWORDS["General"];
+  let domainMatches = 0;
+  for (const token of ansTokens) {
+    if (domainKeywords.has(token)) domainMatches++;
+  }
+
+  // Detect off-topic or unrelated answers
+  const isUnrelated =
+    (qMatches === 0 && domainMatches === 0 && wordCount >= 6) ||
+    (qMatches === 0 && domainMatches <= 1 && wordCount >= 15);
+
+  if (isUnrelated) {
+    return {
+      isValid: true,
+      score: 15, // WEAK
+      correctness: "Unrelated / Off-topic",
+      relevance: "Response does not address the question asked",
+      technicalUnderstanding: "No relevant technical concepts demonstrated",
+      clarity: "Response is off-topic",
+      strengths: [],
+      weaknesses: [
+        "Response does not address the technical question asked",
+        "Content is off-topic or unrelated to the domain subject",
+      ],
+      reasoning: "The response was evaluated as off-topic or irrelevant to the technical question.",
+      feedback: "Your response does not appear to address the technical question asked. Please provide a relevant technical explanation.",
+      action: "NEW_QUESTION",
+      actionReason: "Candidate provided an off-topic answer. Transitioning to a new technical question at adjusted difficulty.",
+    };
+  }
 
   let feedback = "";
   let score = 65;
@@ -629,6 +731,7 @@ const startInterview = async (req, res) => {
       userId: req.userId,
       domain,
       currentDifficulty: initialDifficulty,
+      currentQuestion: firstQuestion,
       difficultyHistory: [
         {
           questionIndex: 1,
@@ -638,7 +741,7 @@ const startInterview = async (req, res) => {
           timestamp: new Date(),
         },
       ],
-      messages: [{ role: "ai", content: firstQuestion }],
+      messages: [{ role: "ai", content: firstQuestion, isQuestion: true, isFollowUp: false }],
     });
 
     res.status(201).json({
@@ -662,6 +765,7 @@ const submitAnswer = async (req, res) => {
       answer,
       domain = "General",
       questionsAnswered = 0,
+      currentQuestion: clientCurrentQuestion,
     } = req.body;
 
     if (!sessionId || !answer)
@@ -680,13 +784,18 @@ const submitAnswer = async (req, res) => {
     const apiKey = process.env.GROQ_API_KEY;
     const canUseGroq = apiKey && !apiKey.includes("placeholder") && apiKey.startsWith("gsk_");
 
-    // Retrieve the current question being answered from conversation history
-    let currentQuestion = "";
-    if (interview.messages && interview.messages.length > 0) {
-      for (let i = interview.messages.length - 1; i >= 0; i--) {
-        if (interview.messages[i].role === "ai" && interview.messages[i].content) {
-          currentQuestion = interview.messages[i].content;
-          break;
+    // Retrieve the exact question being answered (client-specified or last isQuestion message)
+    let currentQuestion = (clientCurrentQuestion || "").trim();
+    if (!currentQuestion) {
+      if (interview.currentQuestion) {
+        currentQuestion = interview.currentQuestion;
+      } else if (interview.messages && interview.messages.length > 0) {
+        for (let i = interview.messages.length - 1; i >= 0; i--) {
+          const m = interview.messages[i];
+          if (m.role === "ai" && m.isQuestion && m.content) {
+            currentQuestion = m.content;
+            break;
+          }
         }
       }
     }
@@ -782,6 +891,7 @@ Return ONLY the question, nothing else.`,
         role: "ai",
         content: invalidFeedback,
         timestamp: new Date(),
+        isQuestion: false,
         isFollowUp: false,
         assessment: {
           score: invalidScore,
@@ -791,6 +901,17 @@ Return ONLY the question, nothing else.`,
           action,
         },
       });
+
+      if (!isComplete && nextQ) {
+        interview.currentQuestion = nextQ;
+        interview.messages.push({
+          role: "ai",
+          content: nextQ,
+          timestamp: new Date(),
+          isQuestion: true,
+          isFollowUp: false,
+        });
+      }
 
       if (isComplete) {
         const validScores = interview.difficultyHistory
@@ -907,7 +1028,10 @@ Return strictly valid JSON with no markdown fences:
           model: "llama-3.3-70b-versatile",
           messages: [
             { role: "system", content: evalPrompt },
-            { role: "user", content: `Candidate's answer: "${answer}"` },
+            {
+              role: "user",
+              content: `TARGET QUESTION TO EVALUATE AGAINST:\n"${currentQuestion}"\n\nCANDIDATE'S SUBMITTED ANSWER:\n"${answer}"\n\nCarefully evaluate this candidate's answer against the target question above. If the answer accurately addresses this specific target question, award an accurate technical score reflecting their technical knowledge and competence.`,
+            },
           ],
           temperature: 0.4,
           max_tokens: 450,
@@ -954,7 +1078,8 @@ Return strictly valid JSON with no markdown fences:
         domain,
         currentDifficulty,
         questionsAnswered,
-        consecutiveFollowUps
+        consecutiveFollowUps,
+        currentQuestion
       );
       score = evaluation.score;
       feedback = evaluation.feedback;
@@ -1015,6 +1140,7 @@ Return strictly valid JSON with no markdown fences:
       role: "ai",
       content: feedback,
       timestamp: new Date(),
+      isQuestion: false,
       isFollowUp: false,
       assessment: {
         score,
@@ -1024,6 +1150,17 @@ Return strictly valid JSON with no markdown fences:
         action,
       },
     });
+
+    if (!isComplete && nextQuestion) {
+      interview.currentQuestion = nextQuestion;
+      interview.messages.push({
+        role: "ai",
+        content: nextQuestion,
+        timestamp: new Date(),
+        isQuestion: true,
+        isFollowUp: action === "FOLLOW_UP",
+      });
+    }
 
     if (isComplete) {
       const validScores = interview.difficultyHistory

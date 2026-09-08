@@ -142,10 +142,25 @@ const InterviewContent = () => {
       },
     ]);
     setIsLoading(true);
+    // Find the immediate preceding question (including follow-ups)
+    let currentQuestionText = "";
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (!messages[i].isUser && messages[i].isQuestion && messages[i].content) {
+        currentQuestionText = messages[i].content;
+        break;
+      }
+    }
+
     try {
       const { data } = await axiosInstance.post(
         "/api/interviews/submit-answer",
-        { sessionId, answer: userMessage, domain, questionsAnswered },
+        {
+          sessionId,
+          answer: userMessage,
+          domain,
+          questionsAnswered,
+          currentQuestion: currentQuestionText,
+        },
       );
       if (data) {
         const newCount = questionsAnswered + 1;
