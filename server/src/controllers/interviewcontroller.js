@@ -143,6 +143,148 @@ const QUESTION_BANK = {
 // Aliases
 QUESTION_BANK["JavaScript"] = QUESTION_BANK["JavaScript/Node.js"];
 
+// Curated Contextual Follow-Up Question Bank (per domain and difficulty)
+const FOLLOW_UP_BANK = {
+  "JavaScript/Node.js": {
+    EASY: [
+      "Can you give a quick code snippet or practical example of the JavaScript behavior you just described?",
+      "How does the concept you mentioned behave when running in strict mode ('use strict')?",
+      "What is a common pitfall or bug that occurs if a developer misunderstands what you just explained?"
+    ],
+    MEDIUM: [
+      "In the architecture you just described, how does that behavior change under asynchronous execution or inside Promise chains?",
+      "Can you describe an edge case where this approach could cause performance bottlenecks or unexpected memory retention?",
+      "How would you test and verify this specific behavior in a unit or integration test suite?"
+    ],
+    HARD: [
+      "How does the V8 runtime handle memory allocation and optimization for what you described under heavy concurrency?",
+      "In a clustered Node.js production service, what race conditions or thread pool saturation issues could emerge from this?",
+      "How would you diagnose and profile issues related to this in production using CPU/heap profilers or core dumps?"
+    ]
+  },
+  "React": {
+    EASY: [
+      "Can you provide a simple component example showing how you would write that in JSX?",
+      "Why is state immutability crucial when applying the concept you described in React?",
+      "What happens to child components when the state or props you mentioned change?"
+    ],
+    MEDIUM: [
+      "How would you prevent unnecessary re-renders when using this pattern across a complex component tree?",
+      "What trade-offs exist between using this approach versus managing state with a custom hook or external store?",
+      "How does React's reconciliation engine process updates related to what you explained?"
+    ],
+    HARD: [
+      "How does React Fiber's lane-based priority scheduling handle concurrent updates in this scenario?",
+      "In a React Server Components (RSC) architecture, would this code run on the server, client, or during hydration?",
+      "How would you benchmark and minimize the frame drop or layout shifts caused by frequent updates here?"
+    ]
+  },
+  "Python": {
+    EASY: [
+      "Could you show how that looks in Python syntax with a concise code example?",
+      "What built-in functions or standard library idioms in Python are best suited for working with this?",
+      "How does Python handle exceptions or type errors when this operation encounters invalid input?"
+    ],
+    MEDIUM: [
+      "How does Python's memory management or garbage collector handle the objects created in your approach?",
+      "What are the time and space complexities of the implementation you described?",
+      "How does the Global Interpreter Lock (GIL) impact this if running multiple CPU-bound operations in parallel?"
+    ],
+    HARD: [
+      "How would you implement this using Python's `asyncio` event loop without blocking the main event loop thread?",
+      "What happens at the CPython bytecode / opcode evaluation loop level during this operation?",
+      "How would you optimize this for zero-copy memory access or sub-millisecond execution using Cython or native C extensions?"
+    ]
+  },
+  "Data Science": {
+    EASY: [
+      "Can you give an intuitive real-world example of when you would apply this technique in an analytics project?",
+      "How would you explain the outcome and intuition of this method to a non-technical business stakeholder?",
+      "What basic data cleaning or preprocessing step is critical before applying this?"
+    ],
+    MEDIUM: [
+      "How would you diagnose whether your model is suffering from high bias versus high variance in this scenario?",
+      "If the dataset suffered from severe 95:5 class imbalance, how would you adjust your evaluation metrics and modeling strategy?",
+      "Why might accuracy be a misleading metric here compared to F1-score or PR-AUC?"
+    ],
+    HARD: [
+      "Mathematically, how does the loss surface behave here, and how do you prevent vanishing or exploding gradients?",
+      "How would you monitor and detect distribution shift / concept drift for this in real-time production?",
+      "How would you scale this inference pipeline to handle sub-10ms latencies over millions of high-dimensional vectors?"
+    ]
+  },
+  "DevOps": {
+    EASY: [
+      "Can you explain the basic command line workflow or configuration file used to achieve what you described?",
+      "What is the key advantage of this approach over traditional virtualized or bare-metal server setups?",
+      "What happens if a process running inside this environment crashes unexpectedly?"
+    ],
+    MEDIUM: [
+      "If you need to automate this in a CI/CD pipeline, what specific testing gates and security scans would you enforce?",
+      "How would you manage environment-specific configurations and secrets securely in this setup?",
+      "How does networking and port mapping function between the container user-space and the host OS in your scenario?"
+    ],
+    HARD: [
+      "If this container experiences severe memory pressure and triggers the Linux kernel OOM killer, how do you diagnose and prevent it?",
+      "How would you architect multi-region failover and distributed state replication for this service with sub-minute RTO/RPO?",
+      "How do you enforce zero-trust security, mutual TLS (mTLS), and cryptographic image signing at the cluster admission level?"
+    ]
+  },
+  "System Design": {
+    EASY: [
+      "What is the simplest architecture diagram or data flow you would start with for this requirement?",
+      "What is the single point of failure (SPOF) in that initial setup, and how do you remove it?",
+      "Why would you introduce a cache or load balancer in front of the application servers here?"
+    ],
+    MEDIUM: [
+      "How would your architecture gracefully handle a sudden 10x traffic surge during a peak viral event?",
+      "What caching invalidation strategy (e.g. Cache-Aside, Write-Through) would you choose, and why?",
+      "How do you guarantee database consistency between read replicas and the primary database node?"
+    ],
+    HARD: [
+      "How would you resolve distributed data conflicts across continents using CRDTs or Paxos/Raft consensus?",
+      "How does your design address the CAP theorem tradeoffs during an cross-region network partition?",
+      "How would you prevent cascading service failures and stampeding herds during downstream database degradation?"
+    ]
+  },
+  "Database Design": {
+    EASY: [
+      "Can you give an example of an SQL query or schema definition that illustrates this?",
+      "What is the key performance difference between finding records via an index versus a full table scan?",
+      "Why is referential integrity and foreign key constraints important in relational schemas?"
+    ],
+    MEDIUM: [
+      "How would transaction isolation levels (e.g., Read Committed vs Serializable) affect concurrent writes in this scenario?",
+      "What indexing strategy (e.g., B-Tree, Composite, Hash) would you apply, and what is the write overhead?",
+      "When would you partition or shard this table, and what partition key would you select to avoid hot spotting?"
+    ],
+    HARD: [
+      "How do the Write-Ahead Log (WAL) and MVCC handle concurrency conflicts under sustained high write loads?",
+      "How would you execute a zero-downtime schema migration on this table with hundreds of millions of rows?",
+      "How does the database manage distributed transactions across shards without introducing two-phase commit latency?"
+    ]
+  },
+  "General": {
+    EASY: [
+      "Can you walk me through a specific, concrete example of how you applied that in a project?",
+      "What was the most important lesson or takeaway from that experience?",
+      "How did you explain your technical approach to peers or team members?"
+    ],
+    MEDIUM: [
+      "What architectural alternatives or trade-offs did you evaluate before settling on that solution?",
+      "If you had to build it over again with more time or scale, what would you improve?",
+      "How did you test and measure the success of that technical decision?"
+    ],
+    HARD: [
+      "What was the most critical architectural risk in that approach, and what automated safeguards did you put in place?",
+      "How did you balance short-term delivery deadlines against long-term architectural debt?",
+      "How did you align conflicting viewpoints among senior engineering stakeholders when making that choice?"
+    ]
+  }
+};
+
+FOLLOW_UP_BANK["JavaScript"] = FOLLOW_UP_BANK["JavaScript/Node.js"];
+
 // Helper: Classify performance based on numerical score
 function classifyPerformance(score) {
   if (score >= 80) return "STRONG";
@@ -172,6 +314,14 @@ function getFallbackQuestion(domain, difficulty = "MEDIUM", index = 0) {
   const domainBank = QUESTION_BANK[domain] || QUESTION_BANK["General"];
   const tier = (difficulty || "MEDIUM").toUpperCase();
   const list = domainBank[tier] || domainBank["MEDIUM"] || QUESTION_BANK["General"]["MEDIUM"];
+  return list[Math.abs(index) % list.length];
+}
+
+// Helper to get contextual fallback follow-up question
+function getFallbackFollowUp(domain, difficulty = "MEDIUM", index = 0, answer = "", currentQuestion = "") {
+  const domainBank = FOLLOW_UP_BANK[domain] || FOLLOW_UP_BANK["General"];
+  const tier = (difficulty || "MEDIUM").toUpperCase();
+  const list = domainBank[tier] || domainBank["MEDIUM"] || FOLLOW_UP_BANK["General"]["MEDIUM"];
   return list[Math.abs(index) % list.length];
 }
 
@@ -311,13 +461,31 @@ function validateAnswer(answer, currentQuestion = "") {
 }
 
 // Smart evaluation fallback if Groq is unavailable
-function generateSmartFeedback(answer, domain, questionIndex) {
+function generateSmartFeedback(
+  answer,
+  domain = "General",
+  currentDifficulty = "MEDIUM",
+  questionIndex = 0,
+  consecutiveFollowUps = 0
+) {
   const validation = validateAnswer(answer);
   if (!validation.isValid) {
     return {
       isValid: false,
-      feedback: validation.feedback,
       score: 0,
+      correctness: "Incorrect / Non-responsive",
+      relevance: "Irrelevant or non-answer",
+      technicalUnderstanding: "None demonstrated",
+      clarity: "Unstructured / non-substantive",
+      strengths: [],
+      weaknesses: [
+        "Response does not address the technical question asked",
+        "Provided non-answer, greeting, or irrelevant text"
+      ],
+      reasoning: "The candidate did not provide a substantive technical response to the question.",
+      feedback: validation.feedback,
+      action: "NEW_QUESTION",
+      actionReason: "Cannot follow up on an invalid or non-answer. Moving to a new question at adjusted difficulty.",
     };
   }
 
@@ -327,23 +495,99 @@ function generateSmartFeedback(answer, domain, questionIndex) {
 
   let feedback = "";
   let score = 65;
+  let strengths = [];
+  let weaknesses = [];
+  let reasoning = "";
+  let correctness = "";
+  let relevance = "Directly addresses the question topic";
+  let technicalUnderstanding = "";
+  let clarity = "";
 
-  if (wordCount < 7) {
-    // Valid but very concise response (e.g. "Containers share the host kernel.")
-    feedback = `Your response touches on a relevant technical point, but is very brief. Elaborate further with architectural details, mechanisms, and practical examples to strengthen your answer.`;
+  if (wordCount < 10) {
     score = 45; // WEAK (< 50)
+    correctness = "Partially accurate or overly simplistic";
+    technicalUnderstanding = "Basic surface-level mention without architectural depth";
+    clarity = "Very brief and incomplete";
+    strengths = ["Identified core terminology relevant to the question"];
+    weaknesses = [
+      "Response is too brief to demonstrate operational or architectural mastery",
+      "Lacks concrete implementation details, mechanisms, and examples",
+    ];
+    reasoning =
+      "The candidate touched upon relevant terminology but provided an extremely brief answer without sufficient technical depth or explanation.";
+    feedback =
+      "Your response touches on a relevant technical point, but is very brief. Elaborate further with architectural details, mechanisms, and practical examples to strengthen your answer.";
   } else if (wordCount < 25) {
-    feedback = `Good start. You understand the basic concept, but you could strengthen your response by elaborating on edge cases, performance considerations, and practical usage.`;
     score = 68; // AVERAGE (50 to 79)
+    correctness = "Technically accurate on the fundamental concepts";
+    technicalUnderstanding = "Solid foundation with working knowledge of standard patterns";
+    clarity = "Good, understandable explanation of the core idea";
+    strengths = [
+      "Accurately explains the primary concept",
+      "Demonstrates practical working understanding of the topic",
+    ];
+    weaknesses = [
+      "Could elaborate more on edge cases, trade-offs, and failure modes",
+      "Would benefit from deeper architectural or internal mechanics details",
+    ];
+    reasoning =
+      "The candidate demonstrated sound basic understanding of the concept, but missed deeper edge-case analysis and architectural trade-offs.";
+    feedback =
+      "Good start. You understand the basic concept, but you could strengthen your response by elaborating on edge cases, performance considerations, and practical usage.";
   } else if (wordCount < 55) {
-    feedback = `Solid answer! You explained the core concepts clearly with relevant technical context. Demonstrating structured communication and problem-solving reasoning made your answer stand out.`;
     score = 84; // STRONG (>= 80)
+    correctness = "Technically accurate and precise";
+    technicalUnderstanding = "Deep understanding of underlying mechanisms and component interaction";
+    clarity = "Well-structured, concise, and professional explanation";
+    strengths = [
+      "Clear and comprehensive explanation of core mechanics",
+      "Structured communication connecting concepts to practical application"
+    ];
+    weaknesses = [
+      "Could briefly touch on subtle performance bottlenecks or distributed failure modes"
+    ];
+    reasoning = "Strong candidate response demonstrating clear technical competence, structured reasoning, and accurate terminology.";
+    feedback = "Solid answer! You explained the core concepts clearly with relevant technical context. Demonstrating structured communication and problem-solving reasoning made your answer stand out.";
   } else {
-    feedback = `Excellent, comprehensive explanation. You provided strong technical depth, addressed trade-offs, and articulated the concepts with high clarity and professional precision.`;
     score = 94; // STRONG (>= 80)
+    correctness = "Exceptionally accurate and detailed";
+    technicalUnderstanding = "Advanced mastery of internals, trade-offs, and system interactions";
+    clarity = "Exemplary professional articulation and reasoning";
+    strengths = [
+      "Comprehensive depth covering architectural mechanisms and trade-offs",
+      "High clarity with nuanced understanding of production considerations"
+    ];
+    weaknesses = [];
+    reasoning = "Outstanding technical depth, addressing core concepts, operational trade-offs, and practical implications with high precision.";
+    feedback = "Excellent, comprehensive explanation. You provided strong technical depth, addressed trade-offs, and articulated the concepts with high clarity and professional precision.";
   }
 
-  return { isValid: true, feedback, score };
+  // Decision rule:
+  // If consecutiveFollowUps >= 1 -> enforce NEW_QUESTION (max 1 consecutive follow-up rule)
+  // Otherwise, if candidate gave a partial/average answer or an interesting strong answer -> FOLLOW_UP
+  const action = (consecutiveFollowUps >= 1) ? "NEW_QUESTION" : "FOLLOW_UP";
+  const actionReason = action === "FOLLOW_UP"
+    ? (score >= 80
+        ? "Candidate showed strong knowledge; following up to probe deeper architectural reasoning and trade-offs."
+        : "Candidate provided a solid foundation; following up to probe for clarification, edge cases, and missing concepts.")
+    : (consecutiveFollowUps >= 1
+        ? "Maximum consecutive follow-up reached on this topic. Transitioning to a new technical area."
+        : "Topic sufficiently explored. Moving to a new question.");
+
+  return {
+    isValid: true,
+    score,
+    correctness,
+    relevance,
+    technicalUnderstanding,
+    clarity,
+    strengths,
+    weaknesses,
+    reasoning,
+    feedback,
+    action,
+    actionReason,
+  };
 }
 
 // ── Start Interview ───────────────────────────────────────
@@ -432,9 +676,6 @@ const submitAnswer = async (req, res) => {
 
     const currentDifficulty = interview.currentDifficulty || "MEDIUM";
     const isComplete = questionsAnswered >= 2; // Complete after 3 questions (0, 1, 2)
-    let feedback = "";
-    let score = 70;
-    let nextQuestion = "";
 
     const apiKey = process.env.GROQ_API_KEY;
     const canUseGroq = apiKey && !apiKey.includes("placeholder") && apiKey.startsWith("gsk_");
@@ -457,8 +698,22 @@ const submitAnswer = async (req, res) => {
     if (!validation.isValid) {
       const invalidScore = 0;
       const invalidPerformance = "WEAK";
-      const invalidFeedback = validation.feedback || "Your response does not address the question. Please provide a relevant technical explanation.";
+      const invalidFeedback =
+        validation.feedback ||
+        "Your response does not address the question. Please provide a relevant technical explanation.";
       const nextDifficulty = calculateNextDifficulty(currentDifficulty, invalidPerformance);
+      const action = "NEW_QUESTION";
+      const actionReason =
+        "The candidate provided an invalid or non-answer. Resetting topic to a new question at adjusted difficulty.";
+      const strengths = [];
+      const weaknesses = [
+        "Response does not address the technical question asked",
+        "Provided non-answer, greeting, or irrelevant text",
+      ];
+      const reasoning =
+        "Candidate submitted an invalid response or non-answer, resulting in a score of 0 and difficulty demotion.";
+
+      interview.consecutiveFollowUps = 0;
 
       let nextQ = "";
       if (!isComplete) {
@@ -485,7 +740,10 @@ Return ONLY the question, nothing else.`,
             });
             nextQ = nextQResponse.choices[0]?.message?.content?.trim() || "";
           } catch (groqErr) {
-            console.warn("Groq error on invalid answer transition, using question bank:", groqErr.message);
+            console.warn(
+              "Groq error on invalid answer transition, using question bank:",
+              groqErr.message
+            );
           }
         }
 
@@ -506,6 +764,12 @@ Return ONLY the question, nothing else.`,
         difficulty: currentDifficulty,
         score: invalidScore,
         performance: invalidPerformance,
+        action,
+        actionReason,
+        strengths,
+        weaknesses,
+        reasoning,
+        isFollowUp: false,
         timestamp: new Date(),
       });
 
@@ -518,6 +782,14 @@ Return ONLY the question, nothing else.`,
         role: "ai",
         content: invalidFeedback,
         timestamp: new Date(),
+        isFollowUp: false,
+        assessment: {
+          score: invalidScore,
+          strengths,
+          weaknesses,
+          reasoning,
+          action,
+        },
       });
 
       if (isComplete) {
@@ -546,6 +818,12 @@ Return ONLY the question, nothing else.`,
           currentDifficulty: nextDifficulty,
           previousDifficulty: currentDifficulty,
           performance: invalidPerformance,
+          action,
+          actionReason,
+          strengths,
+          weaknesses,
+          reasoning,
+          isFollowUp: false,
           difficultyHistory: interview.difficultyHistory,
         });
       }
@@ -559,121 +837,158 @@ Return ONLY the question, nothing else.`,
         previousDifficulty: currentDifficulty,
         performance: invalidPerformance,
         score: invalidScore,
+        action,
+        actionReason,
+        strengths,
+        weaknesses,
+        reasoning,
+        isFollowUp: false,
         difficultyHistory: interview.difficultyHistory,
       });
     }
 
     // ── STEP 2: TECHNICAL EVALUATION (FOR VALID ANSWERS) ──
+    const consecutiveFollowUps = interview.consecutiveFollowUps || 0;
+    const forceNewQuestion = consecutiveFollowUps >= 1;
+
+    let evalAssessment = null;
     if (canUseGroq) {
       try {
         const groq = new Groq({ apiKey });
 
+        const evalPrompt = `You are a senior technical interviewer conducting an adaptive mock interview for a ${domain} developer.
+Current Question: "${currentQuestion}"
+Current Difficulty Level: ${currentDifficulty}
+Previous Consecutive Follow-up Count on this topic: ${consecutiveFollowUps} (Rule: Maximum 1 consecutive follow-up allowed).
+
+Evaluate the candidate's answer thoroughly across 4 key dimensions:
+1. Correctness: Are the technical statements factually true and accurate?
+2. Relevance: Does the response directly address the question asked?
+3. Technical Understanding: Does the candidate understand core principles, mechanisms, and trade-offs?
+4. Quality/Clarity of Explanation: Is the explanation well-structured, clear, and professional?
+
+Scoring rubric (0-100):
+- 80-100: STRONG (accurate, detailed, handles nuances/trade-offs and mechanisms)
+- 50-79: AVERAGE (understands basic concept, mostly accurate, but lacks depth or misses key details)
+- 10-49: WEAK (valid attempt but incorrect, shallow, or missing core principles)
+
+Next action decision ("action"):
+- Choose "FOLLOW_UP" or "NEW_QUESTION".
+- RULE: If consecutiveFollowUps >= 1, "action" MUST be "NEW_QUESTION" (to ensure broad coverage of topics).
+- Otherwise:
+  * If candidate gave a partial, average, or interesting answer with concepts that should be probed deeper -> "FOLLOW_UP".
+  * If candidate gave an exceptionally thorough answer with nothing left to explore in this topic -> "NEW_QUESTION".
+
+Next question ("nextQuestion"):
+- If action is "FOLLOW_UP":
+  * Ask an intelligent follow-up question directly related to what the candidate said in their answer or previous question. Probe deeper understanding, clarification, reasoning, or missing concepts.
+  * The follow-up question MUST match the candidate's adapted difficulty level (EASY: basic syntax/definition/simple example; MEDIUM: application/edge cases/practical constraints; HARD: internals/concurrency/scale).
+- If action is "NEW_QUESTION":
+  * Ask a new technical question on a different topic in ${domain} at the adapted difficulty level.
+
+Return strictly valid JSON with no markdown fences:
+{
+  "isValid": true,
+  "score": 85,
+  "correctness": "Brief assessment of correctness",
+  "relevance": "Brief assessment of relevance",
+  "technicalUnderstanding": "Brief assessment of technical understanding",
+  "clarity": "Brief assessment of clarity",
+  "strengths": ["1-2 concise strengths"],
+  "weaknesses": ["1-2 concise weaknesses or areas for improvement"],
+  "reasoning": "1-2 sentences explaining why this score was awarded",
+  "feedback": "2-3 sentences of constructive evaluation feedback",
+  "action": "FOLLOW_UP or NEW_QUESTION",
+  "actionReason": "Reason for choosing follow-up or new question",
+  "nextQuestion": "The follow-up or new question to ask next"
+}`;
+
         const evalResponse = await groq.chat.completions.create({
           model: "llama-3.3-70b-versatile",
           messages: [
-            {
-              role: "system",
-              content: `You are an expert ${domain} interview evaluator.
-Evaluate candidate answers objectively for the question asked at ${currentDifficulty} difficulty level.
-
-Interview Question: "${currentQuestion}"
-
-Evaluation rules:
-1. First verify if the candidate made a genuine attempt to answer the question.
-2. If the response does NOT attempt to answer the question, or consists of greetings, random text, keyboard mashing, or unrelated content, classify as INVALID: {"isValid": false, "score": 0, "feedback": "Your response does not address the question. Please provide a relevant technical explanation."}.
-3. If the answer is valid:
-   - 80-100: STRONG (accurate, detailed technical explanation, addresses nuances and edge cases)
-   - 50-79: AVERAGE (understands basic concept, mostly accurate, but lacks depth or misses key details)
-   - 10-49: WEAK (valid attempt but incorrect, extremely shallow, or missing core principles)
-
-Return strictly valid JSON with no markdown formatting:
-{"isValid": true, "feedback": "2-3 sentences of constructive feedback", "score": 85}`,
-            },
-            {
-              role: "user",
-              content: `Candidate's answer: "${answer}"`,
-            },
+            { role: "system", content: evalPrompt },
+            { role: "user", content: `Candidate's answer: "${answer}"` },
           ],
-          temperature: 0.5,
-          max_tokens: 250,
+          temperature: 0.4,
+          max_tokens: 450,
         });
 
         const evalContent = evalResponse.choices[0]?.message?.content?.trim() || "";
         try {
           const parsed = JSON.parse(evalContent.replace(/```json|```/g, "").trim());
-          if (parsed.isValid === false || parsed.score === 0) {
-            feedback = parsed.feedback || "Your response does not address the question. Please provide a relevant technical explanation.";
-            score = 0;
-          } else {
-            if (parsed.feedback) feedback = parsed.feedback;
-            if (typeof parsed.score === "number") {
-              score = Math.max(0, Math.min(100, Math.round(parsed.score)));
-            }
+          if (parsed && typeof parsed.score === "number") {
+            evalAssessment = parsed;
           }
         } catch (parseErr) {
-          const scoreMatch = evalContent.match(/"score"\s*:\s*(\d+)/i) || evalContent.match(/\b(\d{1,3})\b/);
-          if (scoreMatch) {
-            score = Math.max(0, Math.min(100, parseInt(scoreMatch[1])));
-          }
-          feedback = evalContent.replace(/"score".*$/, "").replace(/[{}\"]/g, "").trim();
+          console.warn("Groq JSON parse error, falling back to smart evaluation:", parseErr.message);
         }
       } catch (groqErr) {
         console.warn("Groq error during answer evaluation, falling back to smart feedback:", groqErr.message);
       }
     }
 
-    // Fallback feedback & score if Groq was unavailable or failed
-    if (!feedback) {
-      const evaluation = generateSmartFeedback(answer, domain, questionsAnswered);
-      feedback = evaluation.feedback;
+    let score = 70;
+    let feedback = "";
+    let strengths = [];
+    let weaknesses = [];
+    let reasoning = "";
+    let action = "NEW_QUESTION";
+    let actionReason = "";
+    let nextQuestion = "";
+
+    if (evalAssessment) {
+      score = Math.max(0, Math.min(100, Math.round(evalAssessment.score)));
+      feedback = evalAssessment.feedback || "Your response has been evaluated.";
+      strengths = Array.isArray(evalAssessment.strengths) ? evalAssessment.strengths : [];
+      weaknesses = Array.isArray(evalAssessment.weaknesses) ? evalAssessment.weaknesses : [];
+      reasoning = evalAssessment.reasoning || "Evaluation based on correctness, technical understanding, and clarity.";
+      action = (forceNewQuestion || evalAssessment.action === "NEW_QUESTION") ? "NEW_QUESTION" : "FOLLOW_UP";
+      actionReason = evalAssessment.actionReason || (action === "FOLLOW_UP" ? "Probing deeper into candidate's response." : "Moving to a new question.");
+      if (evalAssessment.nextQuestion) {
+        nextQuestion = evalAssessment.nextQuestion;
+      }
+    } else {
+      // Offline / smart evaluation fallback
+      const evaluation = generateSmartFeedback(
+        answer,
+        domain,
+        currentDifficulty,
+        questionsAnswered,
+        consecutiveFollowUps
+      );
       score = evaluation.score;
+      feedback = evaluation.feedback;
+      strengths = evaluation.strengths;
+      weaknesses = evaluation.weaknesses;
+      reasoning = evaluation.reasoning;
+      action = evaluation.action;
+      actionReason = evaluation.actionReason;
     }
 
-    // Classify performance and compute new difficulty
+    // Classify performance and compute adapted next difficulty
     const performance = classifyPerformance(score);
     const nextDifficulty = calculateNextDifficulty(currentDifficulty, performance);
 
-    // If not complete, generate NEXT question using the NEW difficulty
-    if (!isComplete) {
-      if (canUseGroq) {
-        try {
-          const groq = new Groq({ apiKey });
-          const nextQResponse = await groq.chat.completions.create({
-            model: "llama-3.3-70b-versatile",
-            messages: [
-              {
-                role: "system",
-                content: systemPrompt(domain, nextDifficulty),
-              },
-              {
-                role: "user",
-                content: `The candidate just answered a question and performed at a ${performance} level.
-The interview difficulty has adapted to: ${nextDifficulty}.
-Ask the NEXT technical question strictly at ${nextDifficulty} difficulty for a ${domain} developer.
-Previous context: Candidate answered: "${answer.substring(0, 100)}..."
-Return ONLY the question, nothing else.`,
-              },
-            ],
-            temperature: 0.7,
-            max_tokens: 150,
-          });
-
-          nextQuestion = nextQResponse.choices[0]?.message?.content?.trim() || "";
-        } catch (groqErr) {
-          console.warn("Groq error generating next question, using question bank:", groqErr.message);
-        }
-      }
-
-      if (!nextQuestion) {
+    // If not complete and nextQuestion is not yet determined:
+    if (!isComplete && !nextQuestion) {
+      if (action === "FOLLOW_UP") {
+        nextQuestion = getFallbackFollowUp(domain, nextDifficulty, questionsAnswered, answer, currentQuestion);
+      } else {
         nextQuestion = getFallbackQuestion(domain, nextDifficulty, questionsAnswered + 1);
       }
+    }
+
+    // Update consecutive follow-ups counter
+    if (action === "FOLLOW_UP") {
+      interview.consecutiveFollowUps = (interview.consecutiveFollowUps || 0) + 1;
+    } else {
+      interview.consecutiveFollowUps = 0;
     }
 
     // Update Interview state in MongoDB
     interview.currentDifficulty = nextDifficulty;
     interview.questionsAnswered = questionsAnswered + 1;
 
-    // Record question history
     if (!interview.difficultyHistory) {
       interview.difficultyHistory = [];
     }
@@ -682,10 +997,15 @@ Return ONLY the question, nothing else.`,
       difficulty: currentDifficulty,
       score,
       performance,
+      action,
+      actionReason,
+      strengths,
+      weaknesses,
+      reasoning,
+      isFollowUp: action === "FOLLOW_UP",
       timestamp: new Date(),
     });
 
-    // Save chat messages
     interview.messages.push({
       role: "user",
       content: answer,
@@ -695,10 +1015,17 @@ Return ONLY the question, nothing else.`,
       role: "ai",
       content: feedback,
       timestamp: new Date(),
+      isFollowUp: false,
+      assessment: {
+        score,
+        strengths,
+        weaknesses,
+        reasoning,
+        action,
+      },
     });
 
     if (isComplete) {
-      // Calculate overall average score
       const validScores = interview.difficultyHistory
         .map((h) => h.score)
         .filter((s) => typeof s === "number");
@@ -724,6 +1051,12 @@ Return ONLY the question, nothing else.`,
         currentDifficulty: nextDifficulty,
         previousDifficulty: currentDifficulty,
         performance,
+        action,
+        actionReason,
+        strengths,
+        weaknesses,
+        reasoning,
+        isFollowUp: action === "FOLLOW_UP",
         difficultyHistory: interview.difficultyHistory,
       });
     }
@@ -737,6 +1070,12 @@ Return ONLY the question, nothing else.`,
       previousDifficulty: currentDifficulty,
       performance,
       score,
+      action,
+      actionReason,
+      strengths,
+      weaknesses,
+      reasoning,
+      isFollowUp: action === "FOLLOW_UP",
       difficultyHistory: interview.difficultyHistory,
     });
   } catch (err) {
@@ -799,6 +1138,8 @@ module.exports = {
   calculateNextDifficulty,
   classifyPerformance,
   getFallbackQuestion,
+  getFallbackFollowUp,
   generateSmartFeedback,
   QUESTION_BANK,
+  FOLLOW_UP_BANK,
 };

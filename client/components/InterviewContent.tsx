@@ -158,17 +158,28 @@ const InterviewContent = () => {
           { questionIndex: newCount + 1, difficulty: newDiff, performance: perf },
         ]);
 
+        const isFollowUp = Boolean(data.isFollowUp || data.action === "FOLLOW_UP");
+        const assessment = {
+          score: typeof data.score === "number" ? data.score : undefined,
+          strengths: Array.isArray(data.strengths) ? data.strengths : [],
+          weaknesses: Array.isArray(data.weaknesses) ? data.weaknesses : [],
+          reasoning: data.reasoning || "",
+          action: data.action,
+          actionReason: data.actionReason,
+        };
+
         setMessages((prev) => [
           ...prev,
           {
             id: Date.now().toString(),
             content:
               data.feedback ||
-              "Good answer! Your response demonstrates solid understanding",
+              "Your response has been evaluated.",
             isUser: false,
             timestamp: new Date(),
             performance: perf,
             isQuestion: false,
+            assessment,
           },
         ]);
 
@@ -187,6 +198,7 @@ const InterviewContent = () => {
                 timestamp: new Date(),
                 difficulty: newDiff,
                 isQuestion: true,
+                isFollowUp,
               },
             ]);
           }, 500);
