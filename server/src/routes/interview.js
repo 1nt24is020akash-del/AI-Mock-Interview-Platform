@@ -2,6 +2,7 @@ const express = require("express");
 const {
   startInterview,
   submitAnswer,
+  terminateInterview,
   getInterviews,
   getInterview,
 } = require("../controllers/interviewcontroller.js");
@@ -13,6 +14,7 @@ router.use(protect); // all routes require auth
 
 router.post("/start", startInterview);
 router.post("/submit-answer", submitAnswer);
+router.post("/terminate", terminateInterview);
 router.get("/", getInterviews);
 router.get("/:id", getInterview);
 

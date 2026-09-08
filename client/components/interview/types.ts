@@ -89,7 +89,8 @@ export type IntegrityEventType =
   | "MICROPHONE_STOPPED"
   | "FACE_NOT_DETECTED"
   | "MULTIPLE_FACES"
-  | "LOOKING_AWAY";
+  | "LOOKING_AWAY"
+  | "CAMERA_TOO_DARK";
 
 export interface IntegrityEvent {
   id: string;

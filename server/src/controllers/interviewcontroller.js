@@ -1273,9 +1273,82 @@ const getInterview = async (req, res) => {
   }
 };
 
+// ── Terminate Interview Early (Inactivity Timeout / Proctoring Failure) ──
+const terminateInterview = async (req, res) => {
+  try {
+    const { sessionId, reason, integrityReport } = req.body;
+    if (!sessionId) {
+      return res.status(400).json({ message: "Session ID is required" });
+    }
+    const interview = await Interview.findOne({
+      _id: sessionId,
+      userId: req.userId,
+    });
+    if (!interview) {
+      return res.status(404).json({ message: "Interview not found" });
+    }
+
+    const terminationReason =
+      reason ||
+      "Interview ended because no answer was provided after multiple attempts.";
+
+    interview.score = 0;
+    interview.isComplete = true;
+    interview.feedback = terminationReason;
+    const durationMin = Math.max(
+      1,
+      Math.round((Date.now() - new Date(interview.createdAt).getTime()) / 60000)
+    );
+    interview.duration = durationMin;
+
+    if (integrityReport) {
+      interview.integrityReport = {
+        tabSwitches: integrityReport.tabSwitches || 0,
+        fullscreenExits: integrityReport.fullscreenExits || 0,
+        faceNotDetectedCount: integrityReport.faceNotDetectedCount || 0,
+        multipleFacesCount: integrityReport.multipleFacesCount || 0,
+        attentionWarnings: integrityReport.attentionWarnings || 0,
+        screenShareInterruptions: integrityReport.screenShareInterruptions || 0,
+        integrityStatus: integrityReport.integrityStatus || "REVIEW_RECOMMENDED",
+        events: Array.isArray(integrityReport.events) ? integrityReport.events : [],
+      };
+    }
+
+    interview.messages.push({
+      role: "ai",
+      content: terminationReason,
+      timestamp: new Date(),
+      isQuestion: false,
+      assessment: {
+        score: 0,
+        strengths: [],
+        weaknesses: ["No response provided after repeated attempts"],
+        reasoning: "Interview terminated due to inactivity.",
+        action: "TERMINATE",
+      },
+    });
+
+    await interview.save();
+
+    res.json({
+      message: "Interview terminated",
+      score: 0,
+      feedback: terminationReason,
+      isComplete: true,
+      interview,
+    });
+  } catch (err) {
+    console.error("Terminate interview error:", err);
+    res
+      .status(500)
+      .json({ message: "Failed to terminate interview", error: err.message });
+  }
+};
+
 module.exports = {
   startInterview,
   submitAnswer,
+  terminateInterview,
   getInterviews,
   getInterview,
   validateAnswer,

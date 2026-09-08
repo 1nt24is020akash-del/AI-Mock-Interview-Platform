@@ -32,6 +32,8 @@ export function useAttentionMonitor({
   const [isSinglePerson, setIsSinglePerson] = useState<boolean>(true);
   const [isLookingAtScreen, setIsLookingAtScreen] = useState<boolean>(true);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [cameraBrightness, setCameraBrightness] = useState<number>(100);
+  const [isLightingAdequate, setIsLightingAdequate] = useState<boolean>(true);
 
   const lastSpokenWarningTimeRef = useRef<number>(0);
   const videoElemRef = useRef<HTMLVideoElement | null>(null);
@@ -39,6 +41,7 @@ export function useAttentionMonitor({
   const consecutiveNoFaceRef = useRef<number>(0);
   const consecutiveMultiFaceRef = useRef<number>(0);
   const consecutiveLookAwayRef = useRef<number>(0);
+  const consecutiveLowLightRef = useRef<number>(0);
 
   // Helper to trigger warning banner and throttled AI speech
   const triggerWarning = useCallback(
@@ -81,7 +84,7 @@ export function useAttentionMonitor({
           "TAB_SWITCH",
           "Tab Switch Detected",
           "Please return to the interview window. Leaving the interview is not permitted.",
-          "Please return to the interview window. Your active attention is required to continue.",
+          "Please return to the interview window. Your attention is required.",
           "HIGH"
         );
       }
@@ -94,7 +97,7 @@ export function useAttentionMonitor({
           "WINDOW_BLUR",
           "Focus Lost",
           "Interview window lost focus. Please click back into the interview.",
-          "Please refocus on the interview window.",
+          "Please return to the interview window. Your attention is required.",
           "MEDIUM"
         );
       }
@@ -111,7 +114,7 @@ export function useAttentionMonitor({
           "FULLSCREEN_EXIT",
           "Fullscreen Mode Exited",
           "Please re-enter fullscreen mode to maintain session integrity.",
-          "Fullscreen mode was exited. Please remain in fullscreen during the interview.",
+          "Please return to fullscreen to continue the interview.",
           "MEDIUM"
         );
       }
@@ -145,7 +148,7 @@ export function useAttentionMonitor({
         "SCREEN_SHARE_STOPPED",
         "Screen Sharing Stopped",
         "Screen sharing was interrupted. Please restore screen sharing to continue the interview.",
-        "Screen sharing was interrupted. Please share your screen again.",
+        "Your screen sharing has stopped. Please resume screen sharing to continue the interview.",
         "HIGH"
       );
     };
@@ -159,7 +162,7 @@ export function useAttentionMonitor({
 
   // 3. Camera-based Face & Attention Visual Analyzer
   useEffect(() => {
-    if (!isActive || !webcamStream) return;
+    if (!webcamStream) return;
 
     // Create offscreen video and canvas elements if not existing
     if (!videoElemRef.current) {
@@ -205,9 +208,45 @@ export function useAttentionMonitor({
     }
 
     const analyzeFrame = async () => {
-      if (!isActive || !video || video.readyState < 2 || !ctx) return;
+      if (!video || video.readyState < 2 || !ctx) return;
 
       try {
+        // Compute Luminance / Brightness across frame
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imgData.data;
+
+        let totalLuminance = 0;
+        let sampleCount = 0;
+        for (let i = 0; i < data.length; i += 16) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          totalLuminance += 0.299 * r + 0.587 * g + 0.114 * b;
+          sampleCount++;
+        }
+        const avgLuminance = sampleCount > 0 ? totalLuminance / sampleCount : 0;
+        setCameraBrightness(Math.round(avgLuminance));
+        const lightingOk = avgLuminance >= 40;
+        setIsLightingAdequate(lightingOk);
+
+        if (!lightingOk) {
+          consecutiveLowLightRef.current += 1;
+          if (consecutiveLowLightRef.current >= 6 && isActive) {
+            setAttentionWarnings((w) => w + 1);
+            triggerWarning(
+              "CAMERA_TOO_DARK",
+              "Camera Lighting Too Low",
+              "Your camera appears too dark. Please move to a brighter area.",
+              "Your camera appears too dark. Please move to a brighter area so I can clearly see you.",
+              "MEDIUM"
+            );
+            consecutiveLowLightRef.current = 0;
+          }
+        } else {
+          consecutiveLowLightRef.current = 0;
+        }
+
         // Method A: Native Chrome FaceDetector API
         if (nativeDetector) {
           const faces = await nativeDetector.detect(video);
@@ -216,14 +255,14 @@ export function useAttentionMonitor({
             consecutiveMultiFaceRef.current = 0;
             setIsFaceDetected(false);
 
-            if (consecutiveNoFaceRef.current >= 6) { // ~5 seconds
+            if (consecutiveNoFaceRef.current >= 6 && isActive) { // ~5 seconds
               setFaceNotDetectedCount((c) => c + 1);
               setAttentionWarnings((w) => w + 1);
               triggerWarning(
                 "FACE_NOT_DETECTED",
                 "Candidate Not Detected",
                 "Please ensure your face is clearly visible in the camera frame.",
-                "I cannot detect you in the camera frame. Please remain visible to continue.",
+                "I can't see you clearly. Please return to the camera.",
                 "HIGH"
               );
               consecutiveNoFaceRef.current = 0;
@@ -233,14 +272,14 @@ export function useAttentionMonitor({
             consecutiveNoFaceRef.current = 0;
             setIsSinglePerson(false);
 
-            if (consecutiveMultiFaceRef.current >= 4) { // ~3 seconds
+            if (consecutiveMultiFaceRef.current >= 4 && isActive) { // ~3 seconds
               setMultipleFacesCount((c) => c + 1);
               setAttentionWarnings((w) => w + 1);
               triggerWarning(
                 "MULTIPLE_FACES",
                 "Multiple People Detected",
                 "Multiple people detected in frame. Please ensure you are alone for this interview.",
-                "I detected another person in the camera frame. Please make sure you are the only person participating.",
+                "I detected another person in the camera frame. Please make sure you are the only person participating in this interview.",
                 "HIGH"
               );
               consecutiveMultiFaceRef.current = 0;
@@ -261,7 +300,7 @@ export function useAttentionMonitor({
             if (relativeOffset > 0.48) { // Turn away
               consecutiveLookAwayRef.current += 1;
               setIsLookingAtScreen(false);
-              if (consecutiveLookAwayRef.current >= 6) {
+              if (consecutiveLookAwayRef.current >= 6 && isActive) {
                 setAttentionWarnings((w) => w + 1);
                 triggerWarning(
                   "LOOKING_AWAY",
@@ -281,10 +320,6 @@ export function useAttentionMonitor({
         }
 
         // Method B: High-performance Canvas Pixel Analysis Fallback
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const data = imgData.data;
-
         let skinPixelCount = 0;
         let sumX = 0;
         let leftSideCount = 0;
@@ -298,7 +333,7 @@ export function useAttentionMonitor({
           const pixelIndex = i / 4;
           const x = pixelIndex % canvas.width;
 
-          // Standard RGB skin-chroma filter (works across lighting & human skin tones)
+          // Standard RGB skin-chroma filter
           const isSkin =
             r > 60 &&
             g > 40 &&
@@ -320,18 +355,17 @@ export function useAttentionMonitor({
         const skinRatio = skinPixelCount / totalSampled;
 
         if (skinRatio < 0.04) {
-          // Camera covered or candidate walked away
           consecutiveNoFaceRef.current += 1;
           setIsFaceDetected(false);
 
-          if (consecutiveNoFaceRef.current >= 6) {
+          if (consecutiveNoFaceRef.current >= 6 && isActive) {
             setFaceNotDetectedCount((c) => c + 1);
             setAttentionWarnings((w) => w + 1);
             triggerWarning(
               "FACE_NOT_DETECTED",
               "Candidate Not Detected",
               "Please ensure you are visible in the camera frame.",
-              "I cannot detect you in the camera frame. Please remain visible to continue.",
+              "I can't see you clearly. Please return to the camera.",
               "HIGH"
             );
             consecutiveNoFaceRef.current = 0;
@@ -340,18 +374,17 @@ export function useAttentionMonitor({
           consecutiveNoFaceRef.current = 0;
           setIsFaceDetected(true);
 
-          // Multiple people check: high simultaneous skin clusters on extreme left and right
           if (leftSideCount > totalSampled * 0.12 && rightSideCount > totalSampled * 0.12) {
             consecutiveMultiFaceRef.current += 1;
             setIsSinglePerson(false);
-            if (consecutiveMultiFaceRef.current >= 5) {
+            if (consecutiveMultiFaceRef.current >= 5 && isActive) {
               setMultipleFacesCount((c) => c + 1);
               setAttentionWarnings((w) => w + 1);
               triggerWarning(
                 "MULTIPLE_FACES",
                 "Multiple People Detected",
                 "Multiple people detected in frame. Please ensure you are alone for this interview.",
-                "I detected another person in the camera frame. Please make sure you are the only person participating.",
+                "I detected another person in the camera frame. Please make sure you are the only person participating in this interview.",
                 "HIGH"
               );
               consecutiveMultiFaceRef.current = 0;
@@ -361,14 +394,13 @@ export function useAttentionMonitor({
             setIsSinglePerson(true);
           }
 
-          // Centroid position (looking away or leaning out of screen)
           const avgX = skinPixelCount > 0 ? sumX / skinPixelCount : midX;
           const offsetRatio = Math.abs(avgX - midX) / midX;
 
           if (offsetRatio > 0.45) {
             consecutiveLookAwayRef.current += 1;
             setIsLookingAtScreen(false);
-            if (consecutiveLookAwayRef.current >= 6) {
+            if (consecutiveLookAwayRef.current >= 6 && isActive) {
               setAttentionWarnings((w) => w + 1);
               triggerWarning(
                 "LOOKING_AWAY",
@@ -452,6 +484,8 @@ export function useAttentionMonitor({
     isSinglePerson,
     isLookingAtScreen,
     isFullscreen,
+    cameraBrightness,
+    isLightingAdequate,
     getIntegrityReport,
     clearActiveWarning,
   };

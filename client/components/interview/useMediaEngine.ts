@@ -3,6 +3,13 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { DeviceStatus } from "./types";
 
+export interface DeviceVerificationResult {
+  cameraLive: boolean;
+  micLive: boolean;
+  screenLive: boolean;
+  allLive: boolean;
+}
+
 export function useMediaEngine() {
   const [deviceStatus, setDeviceStatus] = useState<DeviceStatus>({
     cameraActive: false,
@@ -28,7 +35,10 @@ export function useMediaEngine() {
   // Setup Web Audio Analyser on an audio stream
   const setupAudioAnalyser = useCallback((stream: MediaStream) => {
     try {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext;
       if (!AudioCtx) return;
 
       if (!audioContextRef.current) {
@@ -70,15 +80,14 @@ export function useMediaEngine() {
     }
   }, []);
 
-  // Initialize Camera & Microphone
-  const startCameraAndMic = useCallback(async () => {
+  // STEP 2: Request Camera Only
+  const requestCamera = useCallback(async (): Promise<boolean> => {
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       setDeviceStatus((prev) => ({
         ...prev,
         cameraPermission: "unsupported",
-        micPermission: "unsupported",
       }));
-      return;
+      return false;
     }
 
     try {
@@ -88,6 +97,51 @@ export function useMediaEngine() {
           height: { ideal: 720 },
           facingMode: "user",
         },
+      });
+
+      const videoTrack = stream.getVideoTracks()[0];
+      if (!videoTrack) throw new Error("No video track returned");
+
+      const existingAudio = webcamStreamRef.current
+        ? webcamStreamRef.current.getAudioTracks()
+        : [];
+      const combined = new MediaStream([videoTrack, ...existingAudio]);
+      webcamStreamRef.current = combined;
+      setWebcamStream(combined);
+
+      setDeviceStatus((prev) => ({
+        ...prev,
+        cameraActive: true,
+        cameraPermission: "granted",
+        isVideoOff: false,
+      }));
+      return true;
+    } catch (err: unknown) {
+      console.warn("Camera getUserMedia error:", err);
+      const isDenied =
+        err instanceof DOMException &&
+        (err.name === "NotAllowedError" || err.name === "PermissionDeniedError");
+      setDeviceStatus((prev) => ({
+        ...prev,
+        cameraActive: false,
+        cameraPermission: isDenied ? "denied" : "unsupported",
+      }));
+      return false;
+    }
+  }, []);
+
+  // STEP 3: Request Microphone Only
+  const requestMicrophone = useCallback(async (): Promise<boolean> => {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setDeviceStatus((prev) => ({
+        ...prev,
+        micPermission: "unsupported",
+      }));
+      return false;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
@@ -95,76 +149,38 @@ export function useMediaEngine() {
         },
       });
 
-      webcamStreamRef.current = stream;
-      setWebcamStream(stream);
+      const audioTrack = stream.getAudioTracks()[0];
+      if (!audioTrack) throw new Error("No audio track returned");
+
       setupAudioAnalyser(stream);
 
+      const existingVideo = webcamStreamRef.current
+        ? webcamStreamRef.current.getVideoTracks()
+        : [];
+      const combined = new MediaStream([...existingVideo, audioTrack]);
+      webcamStreamRef.current = combined;
+      setWebcamStream(combined);
+
       setDeviceStatus((prev) => ({
         ...prev,
-        cameraActive: true,
         micActive: true,
-        cameraPermission: "granted",
         micPermission: "granted",
-        isVideoOff: false,
         isMuted: false,
       }));
+      return true;
     } catch (err: unknown) {
-      console.warn("Camera/Mic getUserMedia error:", err);
-      const isDenied = err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "PermissionDeniedError");
+      console.warn("Microphone getUserMedia error:", err);
+      const isDenied =
+        err instanceof DOMException &&
+        (err.name === "NotAllowedError" || err.name === "PermissionDeniedError");
       setDeviceStatus((prev) => ({
         ...prev,
-        cameraActive: false,
         micActive: false,
-        cameraPermission: isDenied ? "denied" : "unsupported",
         micPermission: isDenied ? "denied" : "unsupported",
       }));
+      return false;
     }
   }, [setupAudioAnalyser]);
-
-  // Request Full Screen Sharing
-  const startScreenShare = useCallback(async () => {
-    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getDisplayMedia) {
-      setDeviceStatus((prev) => ({
-        ...prev,
-        screenPermission: "unsupported",
-      }));
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          displaySurface: "monitor", // Prompts for entire screen
-        },
-        audio: false,
-      });
-
-      screenStreamRef.current = stream;
-      setScreenStream(stream);
-
-      // Listen for browser's native "Stop sharing" bar
-      const videoTrack = stream.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.onended = () => {
-          stopScreenShare();
-        };
-      }
-
-      setDeviceStatus((prev) => ({
-        ...prev,
-        screenShareActive: true,
-        screenPermission: "granted",
-      }));
-    } catch (err: unknown) {
-      console.warn("Screen share error:", err);
-      const isDenied = err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "PermissionDeniedError");
-      setDeviceStatus((prev) => ({
-        ...prev,
-        screenShareActive: false,
-        screenPermission: isDenied ? "denied" : "prompt",
-      }));
-    }
-  }, []);
 
   const stopScreenShare = useCallback(() => {
     if (screenStreamRef.current) {
@@ -178,10 +194,126 @@ export function useMediaEngine() {
     }));
   }, []);
 
+  // STEP 4: Request Full Screen Sharing
+  const requestScreenShare = useCallback(async (): Promise<boolean> => {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getDisplayMedia) {
+      setDeviceStatus((prev) => ({
+        ...prev,
+        screenPermission: "unsupported",
+      }));
+      return false;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          displaySurface: "monitor", // Prompts for entire screen
+        },
+        audio: false,
+      });
+
+      screenStreamRef.current = stream;
+      setScreenStream(stream);
+
+      // Listen for browser native "Stop sharing" bar
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.onended = () => {
+          stopScreenShare();
+        };
+      }
+
+      setDeviceStatus((prev) => ({
+        ...prev,
+        screenShareActive: true,
+        screenPermission: "granted",
+      }));
+      return true;
+    } catch (err: unknown) {
+      console.warn("Screen share error:", err);
+      const isDenied =
+        err instanceof DOMException &&
+        (err.name === "NotAllowedError" || err.name === "PermissionDeniedError");
+      setDeviceStatus((prev) => ({
+        ...prev,
+        screenShareActive: false,
+        screenPermission: isDenied ? "denied" : "prompt",
+      }));
+      return false;
+    }
+  }, [stopScreenShare]);
+
+  // Backward compatibility alias for starting both
+  const startCameraAndMic = useCallback(async () => {
+    const camOk = await requestCamera();
+    const micOk = await requestMicrophone();
+    return camOk && micOk;
+  }, [requestCamera, requestMicrophone]);
+
+  // STEP 5: Verify All Devices are Actively Live
+  const verifyDevicesActive = useCallback((): DeviceVerificationResult => {
+    const isCamActive = Boolean(
+      webcamStreamRef.current &&
+        webcamStreamRef.current
+          .getVideoTracks()
+          .some((t) => t.readyState === "live" && t.enabled)
+    );
+    const isMicActive = Boolean(
+      webcamStreamRef.current &&
+        webcamStreamRef.current
+          .getAudioTracks()
+          .some((t) => t.readyState === "live" && t.enabled)
+    );
+    const isScreenActive = Boolean(
+      screenStreamRef.current &&
+        screenStreamRef.current
+          .getVideoTracks()
+          .some((t) => t.readyState === "live" && t.enabled)
+    );
+
+    return {
+      cameraLive: isCamActive,
+      micLive: isMicActive,
+      screenLive: isScreenActive,
+      allLive: isCamActive && isMicActive && isScreenActive,
+    };
+  }, []);
+
+  // Stop All Media Tracks (Safe Cleanup)
+  const stopAllTracks = useCallback(() => {
+    if (webcamStreamRef.current) {
+      webcamStreamRef.current.getTracks().forEach((track) => track.stop());
+      webcamStreamRef.current = null;
+    }
+    setWebcamStream(null);
+
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((track) => track.stop());
+      screenStreamRef.current = null;
+    }
+    setScreenStream(null);
+
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+
+    setDeviceStatus((prev) => ({
+      ...prev,
+      cameraActive: false,
+      micActive: false,
+      screenShareActive: false,
+    }));
+  }, []);
+
   // Toggle Camera
   const toggleCamera = useCallback(async () => {
     if (!webcamStreamRef.current) {
-      await startCameraAndMic();
+      await requestCamera();
       return;
     }
 
@@ -194,7 +326,7 @@ export function useMediaEngine() {
         cameraActive: videoTrack.enabled,
       }));
     }
-  }, [startCameraAndMic]);
+  }, [requestCamera]);
 
   // Toggle Microphone
   const toggleMic = useCallback(() => {
@@ -219,40 +351,32 @@ export function useMediaEngine() {
     if (deviceStatus.screenShareActive) {
       stopScreenShare();
     } else {
-      await startScreenShare();
+      await requestScreenShare();
     }
-  }, [deviceStatus.screenShareActive, startScreenShare, stopScreenShare]);
+  }, [deviceStatus.screenShareActive, requestScreenShare, stopScreenShare]);
 
-  // Initial media request on mount
+  // Cleanup on unmount
   useEffect(() => {
-    startCameraAndMic();
-
     return () => {
-      // Cleanup all media tracks on unmount
-      if (webcamStreamRef.current) {
-        webcamStreamRef.current.getTracks().forEach((track) => track.stop());
-      }
-      if (screenStreamRef.current) {
-        screenStreamRef.current.getTracks().forEach((track) => track.stop());
-      }
-      if (animFrameRef.current) {
-        cancelAnimationFrame(animFrameRef.current);
-      }
-      if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-        audioContextRef.current.close().catch(() => {});
-      }
+      stopAllTracks();
     };
-  }, [startCameraAndMic]);
+  }, [stopAllTracks]);
 
   return {
     deviceStatus,
     micVolume,
     webcamStream,
     screenStream,
+    requestCamera,
+    requestMicrophone,
+    requestScreenShare,
+    verifyDevicesActive,
+    stopScreenShare,
+    stopAllTracks,
     toggleCamera,
     toggleMic,
     toggleScreenShare,
-    startScreenShare,
     startCameraAndMic,
+    startScreenShare: requestScreenShare,
   };
 }

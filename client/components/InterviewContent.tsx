@@ -42,6 +42,11 @@ import {
   CheckCircle2,
   Lock,
   ArrowRight,
+  Sun,
+  UserCheck,
+  XCircle,
+  RefreshCw,
+  Sparkles,
 } from "lucide-react";
 
 const TOTAL_QUESTIONS = 3;
@@ -128,8 +133,12 @@ export default function InterviewContent() {
     micVolume,
     webcamStream,
     screenStream,
+    requestCamera,
+    requestMicrophone,
+    requestScreenShare,
+    verifyDevicesActive,
+    stopAllTracks,
     toggleScreenShare,
-    startScreenShare,
   } = useMediaEngine();
 
   // Speech Engine (Text-to-Speech & Speech Recognition)
@@ -162,6 +171,8 @@ export default function InterviewContent() {
     isSinglePerson,
     isLookingAtScreen,
     isFullscreen,
+    cameraBrightness,
+    isLightingAdequate,
     getIntegrityReport,
   } = useAttentionMonitor({
     isActive: hasStartedSession && !isInterviewComplete,
@@ -171,6 +182,187 @@ export default function InterviewContent() {
       speak(warningMessage);
     },
   });
+
+  // Pre-Interview Setup Wizard State
+  const [setupStage, setSetupStage] = useState<
+    "idle" | "requesting_cam" | "requesting_mic" | "requesting_screen" | "verifying" | "ready" | "failed"
+  >("idle");
+  const [setupError, setSetupError] = useState<string>("");
+  const setupVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    if (setupVideoRef.current && webcamStream) {
+      setupVideoRef.current.srcObject = webcamStream;
+    }
+  }, [webcamStream]);
+
+  // Run sequential device checks (Steps 2-5)
+  const runDeviceSetup = async () => {
+    setSetupError("");
+
+    // STEP 2: Request Camera
+    setSetupStage("requesting_cam");
+    const camOk = await requestCamera();
+    if (!camOk) {
+      setSetupStage("failed");
+      setSetupError(
+        "Camera access was denied or is unavailable. Please grant camera permissions in your browser and click Try Again."
+      );
+      return;
+    }
+
+    // STEP 3: Request Microphone
+    setSetupStage("requesting_mic");
+    const micOk = await requestMicrophone();
+    if (!micOk) {
+      setSetupStage("failed");
+      setSetupError(
+        "Microphone access was denied or is unavailable. Please grant microphone permissions in your browser and click Try Again."
+      );
+      return;
+    }
+
+    // STEP 4: Request Entire Screen Sharing
+    setSetupStage("requesting_screen");
+    const screenOk = await requestScreenShare();
+    if (!screenOk) {
+      setSetupStage("failed");
+      setSetupError(
+        "Screen sharing was cancelled or denied. Entire screen sharing is mandatory to conduct this proctored technical interview."
+      );
+      return;
+    }
+
+    // STEP 5: Verify all three are actively live
+    setSetupStage("verifying");
+    const verification = verifyDevicesActive();
+    if (!verification.allLive) {
+      setSetupStage("failed");
+      setSetupError(
+        "Device verification failed. Please ensure camera, microphone, and entire screen share are actively transmitting."
+      );
+      return;
+    }
+
+    // All hardware checks passed; now continuous vision and lighting validate
+    setSetupStage("ready");
+  };
+
+  const isCamLive = deviceStatus.cameraActive && deviceStatus.cameraPermission === "granted";
+  const isMicLive = deviceStatus.micActive && deviceStatus.micPermission === "granted";
+  const isScreenLive = deviceStatus.screenShareActive && deviceStatus.screenPermission === "granted";
+  const allDevicesLive = isCamLive && isMicLive && isScreenLive;
+
+  const canBeginInterview =
+    setupStage === "ready" &&
+    allDevicesLive &&
+    isFaceDetected &&
+    isLightingAdequate;
+
+  // 10-Second Answer Inactivity Watchdog State
+  const [inactivityStrikes, setInactivityStrikes] = useState<number>(0);
+  const [inactivityWarning, setInactivityWarning] = useState<string | null>(null);
+  const [terminationReason, setTerminationReason] = useState<string | null>(null);
+  const lastActivityTimestampRef = useRef<number>(Date.now());
+  const strikesRef = useRef<number>(0);
+  strikesRef.current = inactivityStrikes;
+
+  // Candidate activity tracking (typing, voice recognition, or sound)
+  useEffect(() => {
+    if (textInput.trim().length > 0 || interimTranscript.trim().length > 0 || micVolume > 15) {
+      lastActivityTimestampRef.current = Date.now();
+      if (inactivityWarning) {
+        setInactivityWarning(null);
+      }
+    }
+  }, [textInput, interimTranscript, micVolume, inactivityWarning]);
+
+  // Strike 3 Inactivity Termination Handler
+  const handleTimeoutTermination = useCallback(async () => {
+    stopSpeaking();
+    stopListening();
+    setAiStatus("ready");
+
+    const reason = "Interview ended because no answer was provided after multiple attempts.";
+
+    // AI speaks termination notice
+    speak("I haven't received an answer after several attempts, so I'll end the interview now.");
+
+    // Exit fullscreen
+    if (document.fullscreenElement && document.exitFullscreen) {
+      document.exitFullscreen().catch(() => {});
+    }
+
+    // Stop media streams
+    stopAllTracks();
+
+    const currentIntegrityReport = getIntegrityReport();
+    try {
+      if (sessionId) {
+        await axiosInstance.post("/api/interviews/terminate", {
+          sessionId,
+          reason,
+          integrityReport: currentIntegrityReport,
+        });
+      }
+    } catch (err) {
+      console.warn("Backend terminate error:", err);
+    }
+
+    setInterviewScore(0);
+    setFinalIntegrityReport(currentIntegrityReport);
+    setTerminationReason(reason);
+    setIsInterviewComplete(true);
+  }, [stopSpeaking, stopListening, stopAllTracks, getIntegrityReport, sessionId, speak]);
+
+  // 10-Second Inactivity Watchdog
+  useEffect(() => {
+    if (!hasStartedSession || isInterviewComplete || aiStatus !== "listening" || isLoading) {
+      return;
+    }
+
+    lastActivityTimestampRef.current = Date.now();
+
+    const interval = setInterval(() => {
+      const elapsed = (Date.now() - lastActivityTimestampRef.current) / 1000;
+
+      if (elapsed >= 10) {
+        const currentStrike = strikesRef.current;
+        lastActivityTimestampRef.current = Date.now();
+
+        if (currentStrike === 0) {
+          // STRIKE 1
+          setInactivityStrikes(1);
+          setInactivityWarning("Please answer the question. (Attempt 1/3)");
+          speak("Please answer the question I just asked.", {
+            onStart: () => setAiStatus("speaking"),
+            onEnd: () => {
+              setAiStatus("listening");
+              lastActivityTimestampRef.current = Date.now();
+            },
+          });
+        } else if (currentStrike === 1) {
+          // STRIKE 2
+          setInactivityStrikes(2);
+          setInactivityWarning("Please answer the question. (Attempt 2/3)");
+          speak("Please answer the question. Take your time, but I need a response before we continue.", {
+            onStart: () => setAiStatus("speaking"),
+            onEnd: () => {
+              setAiStatus("listening");
+              lastActivityTimestampRef.current = Date.now();
+            },
+          });
+        } else if (currentStrike >= 2) {
+          // STRIKE 3 - TERMINATION
+          setInactivityStrikes(3);
+          clearInterval(interval);
+          handleTimeoutTermination();
+        }
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [hasStartedSession, isInterviewComplete, aiStatus, isLoading, speak, handleTimeoutTermination]);
 
   // Synchronize speech transcript into textInput
   useEffect(() => {
@@ -216,16 +408,11 @@ export default function InterviewContent() {
     }
   }, [isSpeaking, isLoading, isListening]);
 
-  // Start Interview Initiation
+  // STEP 9, 10, 11: Start Interview Session, AI Introduction, and Question 1
   const startInterview = useCallback(async () => {
     try {
       setIsLoading(true);
       setAiStatus("evaluating");
-
-      // Auto-prompt screen share at session launch for proctoring
-      setTimeout(() => {
-        startScreenShare().catch(() => {});
-      }, 1000);
 
       const { data } = await axiosInstance.post("/api/interviews/start", {
         domain,
@@ -252,19 +439,27 @@ export default function InterviewContent() {
           },
         ]);
 
-        // Spoken Introduction by AI Interviewer
+        // STEP 10: AI Introduction Spoken Aloud
         const candidateName = user?.name ? user.name.split(" ")[0] : "there";
-        const introText = `Welcome ${candidateName} to your ${domain} technical interview. I am ${persona.name.split(" ")[0]}. Please think aloud and explain your reasoning clearly as we proceed. Here is your first question: ${qText}`;
+        const personaFirstName = persona.name.split(" ")[0];
+        const introText = `Hello ${candidateName}, welcome to your ${domain} technical interview. I'm ${personaFirstName}, your AI interviewer today. Please answer clearly and explain your thinking. Let's begin.`;
 
         setTimeout(() => {
           speak(introText, {
             onStart: () => setAiStatus("speaking"),
             onEnd: () => {
-              setAiStatus("listening");
-              startListening();
+              // STEP 11: Ask Question 1 Aloud
+              speak(qText, {
+                onStart: () => setAiStatus("speaking"),
+                onEnd: () => {
+                  setAiStatus("listening");
+                  startListening();
+                  lastActivityTimestampRef.current = Date.now();
+                },
+              });
             },
           });
-        }, 600);
+        }, 500);
       }
     } catch (error) {
       console.error("Start interview error:", error);
@@ -278,49 +473,43 @@ export default function InterviewContent() {
           timestamp: new Date(),
         },
       ]);
+      setAiStatus("ready");
     } finally {
       setIsLoading(false);
     }
-  }, [domain, user?.name, persona.name, speak, startListening, startScreenShare]);
+  }, [domain, user?.name, persona.name, speak, startListening]);
 
-  // Handler to enter Fullscreen and start session
-  const handleEnterFullscreenAndStart = async () => {
+  // STEP 8: Handler to Enter Fullscreen and Begin Session
+  const handleBeginFullscreenInterview = async () => {
+    if (!canBeginInterview) return;
+
     try {
       if (document.documentElement.requestFullscreen) {
         await document.documentElement.requestFullscreen().catch(() => {});
       }
-    } catch {
-      // Non-blocking if browser restricts fullscreen
+    } catch (err) {
+      console.warn("Fullscreen request error:", err);
     }
+
     setHasStartedSession(true);
     startInterview();
   };
 
   // Safe Exit and Stream Cleanup
   const handleCleanExit = useCallback(() => {
-    // 1. Exit Fullscreen
     if (document.fullscreenElement && document.exitFullscreen) {
       document.exitFullscreen().catch(() => {});
     }
 
-    // 2. Stop streams
-    if (webcamStream) {
-      webcamStream.getTracks().forEach((t) => t.stop());
-    }
-    if (screenStream) {
-      screenStream.getTracks().forEach((t) => t.stop());
-    }
-
-    // 3. Stop speech synthesis & recognition
+    stopAllTracks();
     stopSpeaking();
     stopListening();
 
-    // 4. Capture final integrity report
     const rep = getIntegrityReport();
     setFinalIntegrityReport(rep);
     setIsInterviewComplete(true);
     setShowExitConfirm(false);
-  }, [webcamStream, screenStream, stopSpeaking, stopListening, getIntegrityReport]);
+  }, [stopAllTracks, stopSpeaking, stopListening, getIntegrityReport]);
 
   // Submit Candidate Answer
   const handleAnswerSubmit = async () => {
@@ -528,12 +717,13 @@ export default function InterviewContent() {
   const activeIntegrity = finalIntegrityReport || getIntegrityReport();
 
   // ----------------------------------------------------
+  // ----------------------------------------------------
   // VIEW 1: PRE-INTERVIEW SETUP & INTEGRITY NOTICE MODAL
   // ----------------------------------------------------
   if (!hasStartedSession && !isInterviewComplete) {
     return (
       <div className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center p-4 sm:p-6 selection:bg-emerald-500/30">
-        <div className="w-full max-w-xl space-y-6">
+        <div className="w-full max-w-xl space-y-5">
           {/* Card Header */}
           <div className="text-center space-y-2">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
@@ -544,76 +734,270 @@ export default function InterviewContent() {
               {domain} Technical Interview
             </h1>
             <p className="text-xs sm:text-sm text-zinc-400 max-w-md mx-auto">
-              You are entering an AI-proctored technical interview conducted by {persona.name}.
+              Conducted by {persona.name} ({persona.title.split("&")[0]}). Follow the sequential device check below before entering.
             </p>
           </div>
 
-          {/* Session Requirements Card */}
-          <Card className="p-6 bg-zinc-900/90 border border-zinc-800 shadow-2xl rounded-2xl space-y-4">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400 border-b border-zinc-800 pb-2">
-              Mandatory Session Protocols
-            </h3>
-
-            <div className="space-y-3 text-xs sm:text-sm">
-              <div className="flex items-start gap-3">
-                <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 flex-shrink-0 mt-0.5">
-                  <Video className="w-4 h-4" />
+          {/* Setup Incomplete / Error Modal */}
+          {setupStage === "failed" && (
+            <Card className="p-5 bg-rose-950/40 border border-rose-500/40 shadow-2xl rounded-2xl space-y-3 animate-in fade-in duration-200">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center flex-shrink-0">
+                  <XCircle className="w-5 h-5" />
                 </div>
                 <div>
-                  <p className="font-semibold text-zinc-200">Continuous Camera Active</p>
-                  <p className="text-xs text-zinc-400">Webcam must remain enabled throughout the entire session.</p>
+                  <h3 className="text-base font-bold text-white">Interview Setup Incomplete</h3>
+                  <p className="text-xs text-rose-300">Mandatory hardware permissions were not granted.</p>
                 </div>
+              </div>
+              <p className="text-xs text-zinc-300 leading-relaxed bg-zinc-900/80 p-3 rounded-xl border border-zinc-800">
+                {setupError}
+              </p>
+              <p className="text-[11px] text-zinc-400">
+                Camera, microphone, and entire screen sharing permissions are strictly required for proctoring and cannot be bypassed. Click below to try again.
+              </p>
+              <Button
+                onClick={runDeviceSetup}
+                className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs py-2.5 flex items-center justify-center gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Try Again
+              </Button>
+            </Card>
+          )}
+
+          {/* Sequential Device & Identity Verification Card */}
+          {setupStage !== "failed" && (
+            <Card className="p-5 sm:p-6 bg-zinc-900/90 border border-zinc-800 shadow-2xl rounded-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-2.5">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-300">
+                  Pre-Interview Device & Identity Verification
+                </h3>
+                <span className="text-[11px] font-mono text-zinc-400">
+                  {setupStage === "ready" ? (
+                    <span className="text-emerald-400 font-semibold">Ready to Begin</span>
+                  ) : setupStage === "idle" ? (
+                    "Setup Required"
+                  ) : (
+                    "Verifying..."
+                  )}
+                </span>
               </div>
 
-              <div className="flex items-start gap-3">
-                <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 flex-shrink-0 mt-0.5">
-                  <Mic className="w-4 h-4" />
+              {/* Checklist Items */}
+              <div className="space-y-3 text-xs sm:text-sm">
+                {/* 1. Camera Check */}
+                <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className={`p-1.5 rounded-lg ${isCamLive ? "bg-emerald-500/15 text-emerald-400" : "bg-zinc-800 text-zinc-400"}`}>
+                        <Video className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <p className="font-semibold text-zinc-200">1. Camera Verification</p>
+                        <p className="text-[11px] text-zinc-400">Continuous webcam active throughout session</p>
+                      </div>
+                    </div>
+                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
+                      isCamLive
+                        ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                        : setupStage === "requesting_cam"
+                          ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                          : "bg-zinc-800/80 text-zinc-500 border-zinc-700"
+                    }`}>
+                      {isCamLive ? "✓ Live Stream" : setupStage === "requesting_cam" ? "Requesting..." : "Pending"}
+                    </span>
+                  </div>
+
+                  {/* Live Video Preview Box */}
+                  {webcamStream && isCamLive && (
+                    <div className="pt-1">
+                      <video
+                        ref={setupVideoRef}
+                        autoPlay
+                        muted
+                        playsInline
+                        className="w-full h-36 sm:h-40 object-cover rounded-lg border border-zinc-700 bg-black"
+                      />
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <p className="font-semibold text-zinc-200">Continuous Microphone Active</p>
-                  <p className="text-xs text-zinc-400">Speak your answers naturally; speech is transcribed in real-time.</p>
+
+                {/* 2. Microphone Check */}
+                <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className={`p-1.5 rounded-lg ${isMicLive ? "bg-emerald-500/15 text-emerald-400" : "bg-zinc-800 text-zinc-400"}`}>
+                        <Mic className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <p className="font-semibold text-zinc-200">2. Microphone Verification</p>
+                        <p className="text-[11px] text-zinc-400">Natural voice answering transcribed in real-time</p>
+                      </div>
+                    </div>
+                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
+                      isMicLive
+                        ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                        : setupStage === "requesting_mic"
+                          ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                          : "bg-zinc-800/80 text-zinc-500 border-zinc-700"
+                    }`}>
+                      {isMicLive ? "✓ Mic Active" : setupStage === "requesting_mic" ? "Requesting..." : "Pending"}
+                    </span>
+                  </div>
+
+                  {/* Live Audio Meter */}
+                  {isMicLive && (
+                    <div className="space-y-1 pt-1">
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-zinc-400">Audio Input Level (Speak to test)</span>
+                        <span className="font-mono text-emerald-400 font-bold">{micVolume}%</span>
+                      </div>
+                      <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-emerald-500 transition-all duration-75"
+                          style={{ width: `${Math.min(100, Math.max(micVolume, 4))}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
+
+                {/* 3. Entire Screen Share Check */}
+                <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800 flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className={`p-1.5 rounded-lg ${isScreenLive ? "bg-emerald-500/15 text-emerald-400" : "bg-zinc-800 text-zinc-400"}`}>
+                      <ScreenShare className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-zinc-200">3. Entire Screen Share</p>
+                      <p className="text-[11px] text-zinc-400">Full monitor share required for session integrity</p>
+                    </div>
+                  </div>
+                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
+                    isScreenLive
+                      ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                      : setupStage === "requesting_screen"
+                        ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                        : "bg-zinc-800/80 text-zinc-500 border-zinc-700"
+                  }`}>
+                    {isScreenLive ? "✓ Screen Shared" : setupStage === "requesting_screen" ? "Requesting..." : "Pending"}
+                  </span>
+                </div>
+
+                {/* 4. Person & Lighting Quality Check */}
+                {isCamLive && (
+                  <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800 space-y-2 animate-in fade-in duration-200">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                      4. Environment & Person Verification
+                    </p>
+
+                    {/* Face presence */}
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <UserCheck className={`w-4 h-4 ${isFaceDetected ? "text-emerald-400" : "text-amber-400"}`} />
+                        <span className={isFaceDetected ? "text-zinc-200" : "text-amber-400 font-semibold"}>
+                          {isFaceDetected ? "Candidate detected in camera frame" : "No person detected. Position yourself in front of camera."}
+                        </span>
+                      </div>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                        isFaceDetected ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" : "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                      }`}>
+                        {isFaceDetected ? "✓ Verified" : "⚠️ Adjust Position"}
+                      </span>
+                    </div>
+
+                    {/* Lighting adequacy */}
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <Sun className={`w-4 h-4 ${isLightingAdequate ? "text-emerald-400" : "text-amber-400"}`} />
+                        <span className={isLightingAdequate ? "text-zinc-200" : "text-amber-400 font-semibold"}>
+                          {isLightingAdequate
+                            ? "Camera & Lighting: Optimal"
+                            : `Lighting is too low (${cameraBrightness}/255). Please move to a brighter space.`}
+                        </span>
+                      </div>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                        isLightingAdequate ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" : "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                      }`}>
+                        {isLightingAdequate ? "✓ Optimal" : "⚠️ Low Lighting"}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              <div className="flex items-start gap-3">
-                <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 flex-shrink-0 mt-0.5">
-                  <ScreenShare className="w-4 h-4" />
-                </div>
-                <div>
-                  <p className="font-semibold text-zinc-200">Entire Screen Sharing</p>
-                  <p className="text-xs text-zinc-400">You will be prompted to share your entire screen for session integrity.</p>
-                </div>
+              {/* Privacy Notice */}
+              <div className="p-3 rounded-xl bg-zinc-950/70 border border-zinc-800 text-[11px] text-zinc-400 leading-relaxed flex items-start gap-2">
+                <Lock className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                <span>
+                  <strong className="text-zinc-300">Privacy Notice:</strong> Streams are processed locally in your browser to verify presence. No continuous video recordings are stored.
+                </span>
               </div>
+            </Card>
+          )}
 
-              <div className="flex items-start gap-3">
-                <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 flex-shrink-0 mt-0.5">
-                  <Maximize2 className="w-4 h-4" />
-                </div>
-                <div>
-                  <p className="font-semibold text-zinc-200">Fullscreen Window Enforcement</p>
-                  <p className="text-xs text-zinc-400">Tab switches, window blur, and fullscreen exits are tracked in the integrity log.</p>
-                </div>
-              </div>
+          {/* Sequential Action Button */}
+          {setupStage === "idle" && (
+            <Button
+              onClick={runDeviceSetup}
+              size="lg"
+              className="w-full rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-black font-extrabold text-sm sm:text-base py-6 shadow-xl shadow-emerald-950/50 transition-all hover:scale-[1.01]"
+            >
+              <Video className="w-4 h-4 mr-2" />
+              Start Pre-Check
+            </Button>
+          )}
+
+          {(setupStage === "requesting_cam" ||
+            setupStage === "requesting_mic" ||
+            setupStage === "requesting_screen" ||
+            setupStage === "verifying") && (
+            <Button
+              disabled
+              size="lg"
+              className="w-full rounded-2xl bg-zinc-800 text-zinc-300 font-extrabold text-sm sm:text-base py-6 opacity-90 cursor-wait"
+            >
+              <RefreshCw className="w-4 h-4 mr-2 animate-spin text-emerald-400" />
+              {setupStage === "requesting_cam" && "Step 2: Requesting Camera Access..."}
+              {setupStage === "requesting_mic" && "Step 3: Requesting Microphone Access..."}
+              {setupStage === "requesting_screen" && "Step 4: Requesting Entire Screen Share..."}
+              {setupStage === "verifying" && "Step 5: Verifying Device Streams..."}
+            </Button>
+          )}
+
+          {setupStage === "ready" && (
+            <div className="space-y-2">
+              <Button
+                onClick={handleBeginFullscreenInterview}
+                disabled={!canBeginInterview}
+                size="lg"
+                className={`w-full rounded-2xl font-extrabold text-sm sm:text-base py-6 shadow-xl transition-all ${
+                  canBeginInterview
+                    ? "bg-emerald-500 hover:bg-emerald-600 text-black shadow-emerald-950/50 hover:scale-[1.01]"
+                    : "bg-zinc-800 text-zinc-500 cursor-not-allowed border border-zinc-700"
+                }`}
+              >
+                <Maximize2 className="w-4 h-4 mr-2" />
+                {canBeginInterview
+                  ? "Begin Fullscreen Interview"
+                  : !isFaceDetected
+                    ? "Position Face in Camera to Begin"
+                    : !isLightingAdequate
+                      ? "Increase Room Lighting to Begin"
+                      : "Complete Checks to Begin"}
+              </Button>
+              {!canBeginInterview && (
+                <p className="text-center text-[11px] text-amber-400">
+                  {!isFaceDetected
+                    ? "⚠️ Please ensure you are clearly visible in the camera before starting."
+                    : !isLightingAdequate
+                      ? "⚠️ Camera lighting is too low. Turn on lights to enable interview."
+                      : "⚠️ Please complete all device verifications."}
+                </p>
+              )}
             </div>
-
-            {/* Privacy Clarification Notice */}
-            <div className="p-3 rounded-xl bg-zinc-950/70 border border-zinc-800 text-[11px] text-zinc-400 leading-relaxed flex items-start gap-2">
-              <Lock className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-              <span>
-                <strong className="text-zinc-300">Privacy Notice:</strong> No raw camera or screen recordings are permanently saved. Real-time vision checks run locally to log presence and attention signals.
-              </span>
-            </div>
-          </Card>
-
-          {/* Launch Button */}
-          <Button
-            onClick={handleEnterFullscreenAndStart}
-            size="lg"
-            className="w-full rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-black font-extrabold text-sm sm:text-base py-6 shadow-xl shadow-emerald-950/50 transition-all hover:scale-[1.01]"
-          >
-            <Maximize2 className="w-4 h-4 mr-2" />
-            Enter Fullscreen Interview
-          </Button>
+          )}
         </div>
       </div>
     );
@@ -634,9 +1018,17 @@ export default function InterviewContent() {
             <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight mb-1">
               Interview Completed
             </h2>
-            <p className="text-xs sm:text-sm text-zinc-400 mb-6">
+            <p className="text-xs sm:text-sm text-zinc-400 mb-4">
               {persona.name} has concluded the assessment for this {domain} session.
             </p>
+
+            {/* Termination Reason Alert Banner */}
+            {terminationReason && (
+              <div className="mb-5 p-3 sm:p-4 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 max-w-lg mx-auto">
+                <AlertTriangle className="w-5 h-5 text-rose-400 flex-shrink-0" />
+                <span>{terminationReason}</span>
+              </div>
+            )}
 
             <ScoreRing score={score} />
 
@@ -771,6 +1163,51 @@ export default function InterviewContent() {
         </div>
       )}
 
+      {/* Persistent Fullscreen Exited Warning Banner */}
+      {!isFullscreenActive && (
+        <div className="bg-amber-500 text-black px-4 py-2 text-xs sm:text-sm font-bold flex items-center justify-between gap-2 shadow-lg z-50">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+            <span>Fullscreen mode was exited. Please return to fullscreen to maintain session integrity.</span>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => {
+              if (document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen().catch(() => {});
+              }
+            }}
+            className="bg-black text-white hover:bg-zinc-800 text-xs font-bold px-3 py-1 rounded-lg"
+          >
+            Return to Fullscreen
+          </Button>
+        </div>
+      )}
+
+      {/* Screen Share Interrupted Pause Overlay */}
+      {!deviceStatus.screenShareActive && (
+        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
+          <Card className="max-w-md w-full p-6 bg-zinc-900 border border-amber-500/40 shadow-2xl rounded-2xl text-center space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="w-14 h-14 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center mx-auto text-2xl">
+              <ScreenShare className="w-7 h-7" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-white">Screen Sharing Interrupted</h3>
+              <p className="text-xs text-amber-400 font-semibold mt-0.5">Interview Paused</p>
+            </div>
+            <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed">
+              Your screen sharing has stopped. Please resume screen sharing to continue the interview.
+            </p>
+            <Button
+              onClick={requestScreenShare}
+              className="w-full bg-amber-500 hover:bg-amber-600 text-black font-extrabold rounded-xl py-3 text-xs sm:text-sm"
+            >
+              Resume Screen Share
+            </Button>
+          </Card>
+        </div>
+      )}
+
       {/* Top Header Bar inside Interview Room */}
       <header className="border-b border-zinc-800/80 bg-zinc-950/90 backdrop-blur-xl sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2.5 flex items-center justify-between gap-4">
@@ -895,6 +1332,14 @@ export default function InterviewContent() {
                   </button>
                 )}
               </div>
+
+              {/* Inactivity Warning Banner */}
+              {inactivityWarning && (
+                <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-semibold animate-pulse">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                  <span>{inactivityWarning}</span>
+                </div>
+              )}
 
               {/* Input Text Area (Live Transcription or Typed) */}
               <div className="relative">
