@@ -6,6 +6,8 @@ const MessageSchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now },
   isQuestion: { type: Boolean, default: false },
   isFollowUp: { type: Boolean, default: false },
+  skipped: { type: Boolean, default: false },
+  repeatedAnswer: { type: Boolean, default: false },
   assessment: {
     score: { type: Number },
     strengths: [{ type: String }],
@@ -22,6 +24,10 @@ const InterviewSchema = new mongoose.Schema({
   score: { type: Number, default: 0 },
   duration: { type: Number, default: 0 }, // minutes
   questionsAnswered: { type: Number, default: 0 },
+  questionsSkipped: { type: Number, default: 0 },
+  totalQuestionsAsked: { type: Number, default: 1 },
+  repeatedAnswersCount: { type: Number, default: 0 },
+  askedQuestions: [{ type: String }],
   consecutiveFollowUps: { type: Number, default: 0 },
   messages: [MessageSchema],
   currentDifficulty: {
@@ -32,15 +38,20 @@ const InterviewSchema = new mongoose.Schema({
   difficultyHistory: [
     {
       questionIndex: { type: Number },
+      questionText: { type: String, default: "" },
       difficulty: { type: String, enum: ["EASY", "MEDIUM", "HARD"] },
       score: { type: Number },
       performance: { type: String, enum: ["STRONG", "AVERAGE", "WEAK"] },
-      action: { type: String, enum: ["FOLLOW_UP", "NEW_QUESTION"] },
+      action: { type: String, enum: ["FOLLOW_UP", "NEW_QUESTION", "SKIP"] },
       actionReason: { type: String, default: "" },
       strengths: [{ type: String }],
       weaknesses: [{ type: String }],
       reasoning: { type: String, default: "" },
       isFollowUp: { type: Boolean, default: false },
+      skipped: { type: Boolean, default: false },
+      repeatedAnswer: { type: Boolean, default: false },
+      candidateAnswer: { type: String, default: "" },
+      feedback: { type: String, default: "" },
       timestamp: { type: Date, default: Date.now },
     },
   ],

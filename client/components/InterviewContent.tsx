@@ -28,6 +28,10 @@ import { QuestionDisplayCard } from "./interview/QuestionDisplayCard";
 import { RealtimeFeedbackPanel } from "./interview/RealtimeFeedbackPanel";
 import { InterviewControlBar } from "./interview/InterviewControlBar";
 import { LiveTranscriptDrawer } from "./interview/LiveTranscriptDrawer";
+import {
+  AdaptiveReportCard,
+  DifficultyHistoryItem,
+} from "./interview/AdaptiveReportCard";
 
 import {
   Mic,
@@ -47,6 +51,7 @@ import {
   XCircle,
   RefreshCw,
   Sparkles,
+  SkipForward,
 } from "lucide-react";
 
 const TOTAL_QUESTIONS = 3;
@@ -103,6 +108,8 @@ export default function InterviewContent() {
   const [sessionId, setSessionId] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
   const [questionsAnswered, setQuestionsAnswered] = useState(0);
+  const [questionsSkipped, setQuestionsSkipped] = useState(0);
+  const [repeatedAnswersCount, setRepeatedAnswersCount] = useState(0);
   const [currentDifficulty, setCurrentDifficulty] = useState<DifficultyLevel>("MEDIUM");
   const [difficultyProgression, setDifficultyProgression] = useState<
     { questionIndex: number; difficulty: DifficultyLevel; performance?: PerformanceLevel }[]
@@ -110,12 +117,15 @@ export default function InterviewContent() {
 
   // Answer Input State (Voice + Text Hybrid)
   const [textInput, setTextInput] = useState<string>("");
+  const [validationError, setValidationError] = useState<string>("");
 
   // Modals & Drawers
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [showTranscriptDrawer, setShowTranscriptDrawer] = useState(false);
   const [isInterviewComplete, setIsInterviewComplete] = useState(false);
   const [interviewScore, setInterviewScore] = useState<number | null>(null);
+  const [finalDifficultyHistory, setFinalDifficultyHistory] = useState<DifficultyHistoryItem[]>([]);
+  const [finalFeedback, setFinalFeedback] = useState<string>("");
   const [finalIntegrityReport, setFinalIntegrityReport] = useState<IntegrityReport | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
@@ -514,7 +524,12 @@ export default function InterviewContent() {
   // Submit Candidate Answer
   const handleAnswerSubmit = async () => {
     const submittedAnswer = textInput.trim();
-    if (!submittedAnswer || !sessionId || isLoading) return;
+    if (!submittedAnswer) {
+      setValidationError("Please enter an answer before submitting, or click Skip to pass this question.");
+      return;
+    }
+    setValidationError("");
+    if (!sessionId || isLoading) return;
 
     // Stop speaking & listening during submission
     stopSpeaking();
@@ -553,15 +568,33 @@ export default function InterviewContent() {
       );
 
       if (data) {
-        const newCount = questionsAnswered + 1;
-        setQuestionsAnswered(newCount);
+        if (Array.isArray(data.difficultyHistory)) {
+          setFinalDifficultyHistory(data.difficultyHistory);
+        }
+        if (data.feedback) {
+          setFinalFeedback(data.feedback);
+        }
+        if (typeof data.questionsAnswered === "number") {
+          setQuestionsAnswered(data.questionsAnswered);
+        } else {
+          setQuestionsAnswered((prev) => prev + 1);
+        }
+        if (typeof data.questionsSkipped === "number") {
+          setQuestionsSkipped(data.questionsSkipped);
+        }
+        if (typeof data.repeatedAnswersCount === "number") {
+          setRepeatedAnswersCount(data.repeatedAnswersCount);
+        }
+
+        const newCount = typeof data.questionsAnswered === "number" ? data.questionsAnswered : questionsAnswered + 1;
+        const totalSoFar = data.totalQuestions || (newCount + questionsSkipped);
         const newDiff = (data.currentDifficulty || currentDifficulty) as DifficultyLevel;
         const perf = data.performance as PerformanceLevel;
         setCurrentDifficulty(newDiff);
 
         setDifficultyProgression((prev) => [
           ...prev,
-          { questionIndex: newCount + 1, difficulty: newDiff, performance: perf },
+          { questionIndex: totalSoFar + 1, difficulty: newDiff, performance: perf },
         ]);
 
         const nextIsFollowUp = Boolean(data.isFollowUp || data.action === "FOLLOW_UP");
@@ -604,7 +637,9 @@ export default function InterviewContent() {
         // Natural AI Verbal Reaction based on score
         const scoreVal = typeof data.score === "number" ? data.score : 70;
         let naturalReaction = "";
-        if (scoreVal >= 80) {
+        if (data.repeatedAnswer) {
+          naturalReaction = "You repeated your previous answer. Let's try a fresh question.";
+        } else if (scoreVal >= 80) {
           naturalReaction = "Good. You clearly understand the core mechanism. I'd like to push this a little further.";
         } else if (scoreVal >= 50) {
           naturalReaction = "You're on the right track. Can you explain what happens internally when we scale this?";
@@ -613,7 +648,7 @@ export default function InterviewContent() {
         }
 
         // Check if interview is completed
-        if (data.isComplete || newCount >= TOTAL_QUESTIONS) {
+        if (data.isComplete || totalSoFar >= TOTAL_QUESTIONS) {
           const finalScore = typeof data.score === "number" ? data.score : 0;
           setInterviewScore(finalScore);
           setFinalIntegrityReport(currentIntegrityReport);
@@ -653,13 +688,148 @@ export default function InterviewContent() {
           });
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Submit answer error:", error);
+      const errMsg = error?.response?.data?.message || "Evaluation connection error. Please try submitting again.";
       setMessages((prev) => [
         ...prev,
         {
           id: (Date.now() + 1).toString(),
-          content: "Evaluation connection error. Please try submitting again.",
+          content: errMsg,
+          isUser: false,
+          timestamp: new Date(),
+        },
+      ]);
+      setAiStatus("ready");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Skip Current Question
+  const handleSkipQuestion = async () => {
+    if (!sessionId || isLoading) return;
+
+    setValidationError("");
+    stopSpeaking();
+    stopListening();
+    setIsLoading(true);
+    setAiStatus("evaluating");
+
+    // Add candidate skip note to transcript history
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        content: "[Skipped Question]",
+        isUser: true,
+        timestamp: new Date(),
+      },
+    ]);
+
+    setTextInput("");
+    clearTranscript();
+
+    const currentIntegrityReport = getIntegrityReport();
+
+    try {
+      const { data } = await axiosInstance.post(
+        "/api/interviews/skip-question",
+        {
+          sessionId,
+          domain,
+          currentQuestion: currentQuestionText,
+          integrityReport: currentIntegrityReport,
+        }
+      );
+
+      if (data) {
+        if (Array.isArray(data.difficultyHistory)) {
+          setFinalDifficultyHistory(data.difficultyHistory);
+        }
+        if (data.feedback) {
+          setFinalFeedback(data.feedback);
+        }
+        const newSkipped = typeof data.questionsSkipped === "number" ? data.questionsSkipped : questionsSkipped + 1;
+        setQuestionsSkipped(newSkipped);
+
+        if (typeof data.questionsAnswered === "number") {
+          setQuestionsAnswered(data.questionsAnswered);
+        }
+        if (typeof data.repeatedAnswersCount === "number") {
+          setRepeatedAnswersCount(data.repeatedAnswersCount);
+        }
+
+        const newDiff = (data.currentDifficulty || currentDifficulty) as DifficultyLevel;
+        setCurrentDifficulty(newDiff);
+
+        // Append feedback message to history
+        const feedbackText = data.feedback || "Question skipped. Moving on to the next question.";
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            content: feedbackText,
+            isUser: false,
+            timestamp: new Date(),
+            isQuestion: false,
+            assessment: {
+              score: 0,
+              strengths: [],
+              weaknesses: ["Question was skipped by candidate"],
+              reasoning: "Question was skipped by candidate.",
+              action: "SKIP",
+            },
+          },
+        ]);
+
+        const totalDone = data.totalQuestions || (questionsAnswered + newSkipped);
+
+        if (data.isComplete || totalDone >= TOTAL_QUESTIONS) {
+          const finalScore = typeof data.score === "number" ? data.score : 0;
+          setInterviewScore(finalScore);
+          setFinalIntegrityReport(currentIntegrityReport);
+          setAiStatus("ready");
+
+          handleCleanExit();
+
+          const closingSpeech = `That completes your technical interview. I am generating your full technical performance and session integrity report now.`;
+          speak(closingSpeech);
+        } else if (data.nextQuestion) {
+          const nextQ = data.nextQuestion;
+          setCurrentQuestionText(nextQ);
+          setIsFollowUp(false);
+
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: (Date.now() + 2).toString(),
+              content: nextQ,
+              isUser: false,
+              timestamp: new Date(),
+              difficulty: newDiff,
+              isQuestion: true,
+              isFollowUp: false,
+            },
+          ]);
+
+          const transitionSpeech = `Skipping this question. Next question: ${nextQ}`;
+          speak(transitionSpeech, {
+            onStart: () => setAiStatus("speaking"),
+            onEnd: () => {
+              setAiStatus("listening");
+              startListening();
+            },
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Skip question error:", error);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          content: "Failed to skip question. Please try again.",
           isUser: false,
           timestamp: new Date(),
         },
@@ -1007,139 +1177,78 @@ export default function InterviewContent() {
   // VIEW 2: FINAL COMPREHENSIVE PERFORMANCE & INTEGRITY REPORT
   // ----------------------------------------------------
   if (isInterviewComplete) {
+    // Synthesize history from messages if finalDifficultyHistory is empty
+    const effectiveHistory: DifficultyHistoryItem[] =
+      finalDifficultyHistory.length > 0
+        ? finalDifficultyHistory
+        : (() => {
+            const items: DifficultyHistoryItem[] = [];
+            let currentQ = "";
+            let currentDiff: "EASY" | "MEDIUM" | "HARD" = "MEDIUM";
+            let qIdx = 0;
+
+            for (let i = 0; i < messages.length; i++) {
+              const m = messages[i];
+              if (!m.isUser && m.isQuestion && m.content) {
+                qIdx++;
+                currentQ = m.content;
+                currentDiff = (m.difficulty as any) || "MEDIUM";
+              } else if (m.isUser) {
+                const nextAiMsg = messages[i + 1];
+                const isSkipped = m.content === "[Skipped Question]";
+                items.push({
+                  questionIndex: qIdx,
+                  questionText: currentQ,
+                  candidateAnswer: m.content,
+                  difficulty: currentDiff,
+                  score: isSkipped ? 0 : nextAiMsg?.assessment?.score ?? (score || 70),
+                  performance: isSkipped ? "WEAK" : nextAiMsg?.performance || "AVERAGE",
+                  action: isSkipped ? "SKIP" : nextAiMsg?.assessment?.action,
+                  actionReason: nextAiMsg?.assessment?.actionReason,
+                  strengths: nextAiMsg?.assessment?.strengths || [],
+                  weaknesses: nextAiMsg?.assessment?.weaknesses || [],
+                  reasoning: nextAiMsg?.assessment?.reasoning,
+                  feedback: nextAiMsg?.content,
+                  isFollowUp: Boolean(nextAiMsg?.isFollowUp),
+                  skipped: isSkipped,
+                  repeatedAnswer: Boolean(m.repeatedAnswer),
+                });
+              }
+            }
+            return items;
+          })();
+
+    const startDiffTier = difficultyProgression[0]?.difficulty || "MEDIUM";
+    const finalDiffTier = currentDifficulty;
+
     return (
-      <div className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center p-3 sm:p-6 selection:bg-emerald-500/30">
-        <div className="w-full max-w-3xl space-y-5 animate-in fade-in zoom-in-95 duration-500">
-          {/* Main Score & Persona Header */}
-          <Card className="p-6 sm:p-8 bg-zinc-900/90 border border-zinc-800 text-center shadow-2xl rounded-2xl">
-            <div className="text-4xl mb-2">
-              {score >= 80 ? "🏆" : score >= 60 ? "🎯" : "📚"}
+      <div className="min-h-screen bg-zinc-950 text-zinc-100 py-8 px-3 sm:px-6 selection:bg-emerald-500/30">
+        <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in zoom-in-95 duration-500">
+          {terminationReason && (
+            <div className="p-4 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 max-w-xl mx-auto shadow-xl">
+              <AlertTriangle className="w-5 h-5 text-rose-400 flex-shrink-0" />
+              <span>{terminationReason}</span>
             </div>
-            <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight mb-1">
-              Interview Completed
-            </h2>
-            <p className="text-xs sm:text-sm text-zinc-400 mb-4">
-              {persona.name} has concluded the assessment for this {domain} session.
-            </p>
+          )}
 
-            {/* Termination Reason Alert Banner */}
-            {terminationReason && (
-              <div className="mb-5 p-3 sm:p-4 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 max-w-lg mx-auto">
-                <AlertTriangle className="w-5 h-5 text-rose-400 flex-shrink-0" />
-                <span>{terminationReason}</span>
-              </div>
-            )}
-
-            <ScoreRing score={score} />
-
-            <p className={`text-base font-bold mt-5 ${scoreLabel.color}`}>
-              {scoreLabel.text}
-            </p>
-          </Card>
-
-          {/* Dual Column: Technical Performance & Integrity Audit */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Technical Performance Card */}
-            <Card className="p-5 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-3">
-              <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4" /> Technical Evaluation
-                </h4>
-                <span className="text-[11px] font-mono font-bold text-zinc-200">
-                  Level: {currentDifficulty}
-                </span>
-              </div>
-
-              <div className="space-y-2 text-xs">
-                {[
-                  { label: "Technical Accuracy", pct: metrics.technicalScore },
-                  { label: "Communication Clarity", pct: metrics.communicationScore },
-                  { label: "Confidence & Fluency", pct: metrics.confidenceScore },
-                  { label: "Explanation Quality", pct: metrics.clarityScore },
-                ].map((b, i) => (
-                  <div key={i} className="space-y-1">
-                    <div className="flex justify-between">
-                      <span className="text-zinc-400">{b.label}</span>
-                      <span className="font-mono font-bold text-emerald-400">{b.pct}%</span>
-                    </div>
-                    <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-emerald-500 rounded-full"
-                        style={{ width: `${b.pct}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="pt-2 text-[11px] text-zinc-400 flex justify-between border-t border-zinc-800">
-                <span>Questions: {questionsAnswered} / {TOTAL_QUESTIONS}</span>
-                <span>Duration: {formatTime(elapsedSeconds)}</span>
-              </div>
-            </Card>
-
-            {/* Interview Integrity Audit Card */}
-            <Card className="p-5 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-3">
-              <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-cyan-400 flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4" /> Integrity Audit
-                </h4>
-                <span
-                  className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
-                    activeIntegrity.integrityStatus === "VERIFIED"
-                      ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
-                      : "bg-amber-500/15 text-amber-400 border-amber-500/30"
-                  }`}
-                >
-                  {activeIntegrity.integrityStatus === "VERIFIED" ? "Verified High" : "Review Recommended"}
-                </span>
-              </div>
-
-              <div className="space-y-2 text-xs">
-                <div className="flex justify-between py-1 border-b border-zinc-800/60">
-                  <span className="text-zinc-400">Tab / Window Switches</span>
-                  <span className={`font-mono font-bold ${activeIntegrity.tabSwitches > 0 ? "text-amber-400" : "text-zinc-300"}`}>
-                    {activeIntegrity.tabSwitches}
-                  </span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-zinc-800/60">
-                  <span className="text-zinc-400">Fullscreen Exits</span>
-                  <span className={`font-mono font-bold ${activeIntegrity.fullscreenExits > 0 ? "text-amber-400" : "text-zinc-300"}`}>
-                    {activeIntegrity.fullscreenExits}
-                  </span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-zinc-800/60">
-                  <span className="text-zinc-400">Face Not Detected Signals</span>
-                  <span className={`font-mono font-bold ${activeIntegrity.faceNotDetectedCount > 0 ? "text-amber-400" : "text-zinc-300"}`}>
-                    {activeIntegrity.faceNotDetectedCount}
-                  </span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-zinc-800/60">
-                  <span className="text-zinc-400">Multiple Persons Signals</span>
-                  <span className={`font-mono font-bold ${activeIntegrity.multipleFacesCount > 0 ? "text-rose-400" : "text-zinc-300"}`}>
-                    {activeIntegrity.multipleFacesCount}
-                  </span>
-                </div>
-                <div className="flex justify-between py-1">
-                  <span className="text-zinc-400">Screen Share Interruptions</span>
-                  <span className={`font-mono font-bold ${activeIntegrity.screenShareInterruptions > 0 ? "text-amber-400" : "text-zinc-300"}`}>
-                    {activeIntegrity.screenShareInterruptions}
-                  </span>
-                </div>
-              </div>
-            </Card>
-          </div>
-
-          {/* Return to Dashboard Button */}
-          <div className="flex items-center justify-end gap-3 pt-2">
-            <Button
-              onClick={handleReturnToDashboard}
-              size="lg"
-              className="w-full sm:w-auto rounded-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:opacity-90 text-white font-extrabold px-8 shadow-xl shadow-emerald-950/40"
-            >
-              Back to Dashboard ➔
-            </Button>
-          </div>
+          <AdaptiveReportCard
+            candidateName={user?.name || "Candidate"}
+            candidateEmail={user?.email || ""}
+            role={domain}
+            totalQuestions={TOTAL_QUESTIONS}
+            questionsAnswered={questionsAnswered}
+            questionsSkipped={questionsSkipped}
+            repeatedAnswersCount={repeatedAnswersCount}
+            startingDifficulty={startDiffTier}
+            finalDifficulty={finalDiffTier}
+            score={score}
+            durationMinutes={Math.max(1, Math.round(elapsedSeconds / 60))}
+            difficultyHistory={effectiveHistory}
+            integrityReport={finalIntegrityReport || getIntegrityReport()}
+            feedback={finalFeedback || messages.filter((m) => !m.isUser && !m.isQuestion).pop()?.content}
+            onReturnToDashboard={handleReturnToDashboard}
+            onRetake={() => router.push(`/interview?domain=${encodeURIComponent(domain)}`)}
+          />
         </div>
       </div>
     );
@@ -1242,9 +1351,9 @@ export default function InterviewContent() {
 
           {/* Center: Question Progress */}
           <div className="hidden md:flex flex-col items-center gap-1">
-            <ProgressDots current={questionsAnswered} total={TOTAL_QUESTIONS} />
+            <ProgressDots current={questionsAnswered + questionsSkipped} total={TOTAL_QUESTIONS} />
             <p className="text-[10px] font-medium text-zinc-400">
-              Question {Math.min(questionsAnswered + 1, TOTAL_QUESTIONS)} of {TOTAL_QUESTIONS}
+              Question {Math.min(questionsAnswered + questionsSkipped + 1, TOTAL_QUESTIONS)} of {TOTAL_QUESTIONS}
             </p>
           </div>
 
@@ -1298,7 +1407,7 @@ export default function InterviewContent() {
               questionText={currentQuestionText}
               difficulty={currentDifficulty}
               isFollowUp={isFollowUp}
-              questionNumber={Math.min(questionsAnswered + 1, TOTAL_QUESTIONS)}
+              questionNumber={Math.min(questionsAnswered + questionsSkipped + 1, TOTAL_QUESTIONS)}
               totalQuestions={TOTAL_QUESTIONS}
               isSpeaking={isSpeaking}
               interviewerName={persona.name.split(" ")[0]}
@@ -1324,6 +1433,7 @@ export default function InterviewContent() {
                     onClick={() => {
                       setTextInput("");
                       clearTranscript();
+                      if (validationError) setValidationError("");
                     }}
                     className="text-zinc-400 hover:text-rose-400 transition-colors flex items-center gap-1 text-[11px]"
                   >
@@ -1332,6 +1442,14 @@ export default function InterviewContent() {
                   </button>
                 )}
               </div>
+
+              {/* Validation Warning Banner */}
+              {validationError && (
+                <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-semibold animate-in fade-in duration-200">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                  <span>{validationError}</span>
+                </div>
+              )}
 
               {/* Inactivity Warning Banner */}
               {inactivityWarning && (
@@ -1350,6 +1468,7 @@ export default function InterviewContent() {
                   onChange={(e) => {
                     setTextInput(e.target.value);
                     setFinalTranscript(e.target.value);
+                    if (validationError) setValidationError("");
                   }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
@@ -1361,11 +1480,24 @@ export default function InterviewContent() {
                   className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl p-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/30 resize-none transition-all"
                 />
 
-                {/* Submit Button Inside Textarea */}
+                {/* Submit and Skip Buttons Inside Textarea */}
                 <div className="absolute right-2.5 bottom-3.5 flex items-center gap-2">
                   <Button
+                    type="button"
+                    onClick={handleSkipQuestion}
+                    disabled={isLoading}
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl border-zinc-700 bg-zinc-900/95 hover:bg-zinc-800 text-zinc-300 hover:text-amber-300 font-semibold text-xs px-3 py-1.5 transition-all flex items-center gap-1.5 shadow-sm"
+                    title="Skip this question (no penalty, difficulty preserved)"
+                  >
+                    <SkipForward className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Skip</span>
+                  </Button>
+
+                  <Button
                     onClick={handleAnswerSubmit}
-                    disabled={isLoading || !textInput.trim()}
+                    disabled={isLoading}
                     size="sm"
                     className="rounded-xl bg-emerald-500 hover:bg-emerald-600 text-black font-bold text-xs px-3.5 py-1.5 shadow-lg shadow-emerald-950/40 transition-all disabled:opacity-40"
                   >

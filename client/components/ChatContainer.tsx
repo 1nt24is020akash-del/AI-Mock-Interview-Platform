@@ -9,7 +9,7 @@ export interface MessageAssessment {
   strengths?: string[];
   weaknesses?: string[];
   reasoning?: string;
-  action?: "FOLLOW_UP" | "NEW_QUESTION";
+  action?: "FOLLOW_UP" | "NEW_QUESTION" | "SKIP";
   actionReason?: string;
 }
 
@@ -22,6 +22,8 @@ export interface Message {
   performance?: PerformanceLevel;
   isQuestion?: boolean;
   isFollowUp?: boolean;
+  skipped?: boolean;
+  repeatedAnswer?: boolean;
   assessment?: MessageAssessment;
 }
 

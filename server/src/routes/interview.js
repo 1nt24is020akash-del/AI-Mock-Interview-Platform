@@ -2,6 +2,7 @@ const express = require("express");
 const {
   startInterview,
   submitAnswer,
+  skipQuestion,
   terminateInterview,
   getInterviews,
   getInterview,
@@ -14,6 +15,7 @@ router.use(protect); // all routes require auth
 
 router.post("/start", startInterview);
 router.post("/submit-answer", submitAnswer);
+router.post("/skip-question", skipQuestion);
 router.post("/terminate", terminateInterview);
 router.get("/", getInterviews);
 router.get("/:id", getInterview);

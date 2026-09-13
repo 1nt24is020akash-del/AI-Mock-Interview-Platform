@@ -309,20 +309,133 @@ function calculateNextDifficulty(currentDifficulty, performance) {
   return levels[currentIndex];
 }
 
-// Helper to get fallback question based on domain, difficulty tier, and index
-function getFallbackQuestion(domain, difficulty = "MEDIUM", index = 0) {
+// Helper: Record difficultyHistory preserving single entry per question (updates initial placeholder if score was null)
+function recordDifficultyHistory(interview, record) {
+  if (!interview.difficultyHistory) {
+    interview.difficultyHistory = [];
+  }
+  if (
+    interview.difficultyHistory.length === 1 &&
+    interview.difficultyHistory[0].score === null &&
+    !interview.difficultyHistory[0].skipped
+  ) {
+    interview.difficultyHistory[0] = record;
+  } else {
+    interview.difficultyHistory.push(record);
+  }
+}
+
+// Helper to normalize question text for comparison and deduplication
+function normalizeQuestionText(q) {
+  return (q || "").toLowerCase().replace(/[^a-z0-9]/g, "").trim();
+}
+
+// Helper to get non-duplicate fallback question based on domain, difficulty tier, and history
+function getNonDuplicateQuestion(domain, difficulty = "MEDIUM", askedQuestions = [], index = 0) {
   const domainBank = QUESTION_BANK[domain] || QUESTION_BANK["General"];
   const tier = (difficulty || "MEDIUM").toUpperCase();
   const list = domainBank[tier] || domainBank["MEDIUM"] || QUESTION_BANK["General"]["MEDIUM"];
+  const askedSet = new Set((askedQuestions || []).map(normalizeQuestionText));
+
+  // 1. Unasked in current domain & tier
+  for (let i = 0; i < list.length; i++) {
+    const candidate = list[(Math.abs(index) + i) % list.length];
+    if (!askedSet.has(normalizeQuestionText(candidate))) {
+      return candidate;
+    }
+  }
+
+  // 2. Unasked in other tiers of this domain
+  const tiers = ["MEDIUM", "EASY", "HARD"];
+  for (const t of tiers) {
+    const tList = domainBank[t] || [];
+    for (const candidate of tList) {
+      if (!askedSet.has(normalizeQuestionText(candidate))) {
+        return candidate;
+      }
+    }
+  }
+
+  // 3. Unasked in General bank
+  for (const t of tiers) {
+    const gList = QUESTION_BANK["General"] ? QUESTION_BANK["General"][t] || [] : [];
+    for (const candidate of gList) {
+      if (!askedSet.has(normalizeQuestionText(candidate))) {
+        return candidate;
+      }
+    }
+  }
+
+  // 4. Fallback if exhausted
+  return list[Math.abs(index) % list.length];
+}
+
+// Helper to get fallback question based on domain, difficulty tier, and index
+function getFallbackQuestion(domain, difficulty = "MEDIUM", index = 0) {
+  return getNonDuplicateQuestion(domain, difficulty, [], index);
+}
+
+// Helper to get non-duplicate contextual fallback follow-up question
+function getNonDuplicateFollowUp(domain, difficulty = "MEDIUM", askedQuestions = [], index = 0) {
+  const domainBank = FOLLOW_UP_BANK[domain] || FOLLOW_UP_BANK["General"];
+  const tier = (difficulty || "MEDIUM").toUpperCase();
+  const list = domainBank[tier] || domainBank["MEDIUM"] || FOLLOW_UP_BANK["General"]["MEDIUM"];
+  const askedSet = new Set((askedQuestions || []).map(normalizeQuestionText));
+
+  for (let i = 0; i < list.length; i++) {
+    const candidate = list[(Math.abs(index) + i) % list.length];
+    if (!askedSet.has(normalizeQuestionText(candidate))) {
+      return candidate;
+    }
+  }
+
   return list[Math.abs(index) % list.length];
 }
 
 // Helper to get contextual fallback follow-up question
 function getFallbackFollowUp(domain, difficulty = "MEDIUM", index = 0, answer = "", currentQuestion = "") {
-  const domainBank = FOLLOW_UP_BANK[domain] || FOLLOW_UP_BANK["General"];
-  const tier = (difficulty || "MEDIUM").toUpperCase();
-  const list = domainBank[tier] || domainBank["MEDIUM"] || FOLLOW_UP_BANK["General"]["MEDIUM"];
-  return list[Math.abs(index) % list.length];
+  return getNonDuplicateFollowUp(domain, difficulty, [], index);
+}
+
+// Helper to detect repeated answers across session history
+function isRepeatedAnswer(answer, previousAnswers = []) {
+  if (!answer || !previousAnswers || previousAnswers.length === 0) {
+    return false;
+  }
+  const currentClean = answer.toLowerCase().replace(/[^a-z0-9]/g, " ").trim();
+  const currentTokens = currentClean.split(/\s+/).filter(Boolean);
+  if (currentTokens.length === 0) return false;
+
+  for (const prev of previousAnswers) {
+    if (!prev || typeof prev !== "string") continue;
+    const prevClean = prev.toLowerCase().replace(/[^a-z0-9]/g, " ").trim();
+    if (!prevClean) continue;
+
+    // 1. Exact match
+    if (currentClean === prevClean) return true;
+
+    // 2. Substantial token overlap for multi-word answers
+    const prevTokens = prevClean.split(/\s+/).filter(Boolean);
+    if (prevTokens.length >= 3 && currentTokens.length >= 3) {
+      const prevTokenSet = new Set(prevTokens);
+      let intersection = 0;
+      for (const t of currentTokens) {
+        if (prevTokenSet.has(t)) intersection++;
+      }
+      const union = new Set([...currentTokens, ...prevTokens]).size;
+      const jaccard = union > 0 ? intersection / union : 0;
+      if (jaccard >= 0.70) return true;
+
+      // Check if one is a 85%+ subset of another with length >= 6 words
+      if (
+        (currentTokens.length >= 6 && intersection / currentTokens.length >= 0.85) ||
+        (prevTokens.length >= 6 && intersection / prevTokens.length >= 0.85)
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 // System prompt generator explicitly targeting requested difficulty
@@ -450,10 +563,10 @@ function validateAnswer(answer, currentQuestion = "") {
     }
   }
 
-  // 7. Non-answers and conversational greetings only
+  // 7. Non-answers and conversational greetings only (Note: "yes", "no", "ok" are handled separately as very short answers)
   const GREETINGS_AND_NON_ANSWERS = new Set([
     "hi", "hello", "hey", "hola", "sup", "yo", "good morning", "good afternoon",
-    "good evening", "how are you", "test", "testing", "ok", "okay", "yes", "no",
+    "good evening", "how are you", "test", "testing",
     "idk", "i dont know", "i don't know", "no idea", "dunno", "not sure",
     "pass", "skip", "next", "bye", "who are you", "what", "why", "help"
   ]);
@@ -463,6 +576,15 @@ function validateAnswer(answer, currentQuestion = "") {
       isValid: false,
       reason: "greeting_or_non_answer",
       feedback: "Your response does not address the question. Please provide a relevant technical explanation.",
+    };
+  }
+
+  // 8. Recognize very short answers ("yes", "no", "ok", "React", "Java") as valid attempts
+  const VERY_SHORT_ANSWERS = new Set(["yes", "no", "ok", "okay", "yep", "nope", "sure", "true", "false"]);
+  if (VERY_SHORT_ANSWERS.has(normalizedPhrase) || words.length <= 3) {
+    return {
+      isValid: true,
+      isVeryShort: true,
     };
   }
 
@@ -605,7 +727,21 @@ function generateSmartFeedback(
   let technicalUnderstanding = "";
   let clarity = "";
 
-  if (wordCount < 10) {
+  if (wordCount <= 3) {
+    score = 30; // WEAK (20-45)
+    correctness = "Minimal or one-word response";
+    technicalUnderstanding = "Extremely brief; lacks technical explanation";
+    clarity = "Single word or very short answer";
+    strengths = ["Provided a direct minimal response"];
+    weaknesses = [
+      "Response is too brief to demonstrate technical competence",
+      "Lacks architectural details, mechanisms, and examples",
+    ];
+    reasoning =
+      "Candidate gave a 1-3 word answer without technical explanation or context.";
+    feedback =
+      "Your response is very brief. While you touched on the topic, a technical interview requires explaining the underlying mechanisms, trade-offs, and practical examples. Please elaborate further.";
+  } else if (wordCount < 10) {
     score = 45; // WEAK (< 50)
     correctness = "Partially accurate or overly simplistic";
     technicalUnderstanding = "Basic surface-level mention without architectural depth";
@@ -732,9 +868,13 @@ const startInterview = async (req, res) => {
       domain,
       currentDifficulty: initialDifficulty,
       currentQuestion: firstQuestion,
+      askedQuestions: [firstQuestion],
+      questionsSkipped: 0,
+      repeatedAnswersCount: 0,
       difficultyHistory: [
         {
           questionIndex: 1,
+          questionText: firstQuestion,
           difficulty: initialDifficulty,
           score: null,
           performance: null,
@@ -764,27 +904,40 @@ const submitAnswer = async (req, res) => {
       sessionId,
       answer,
       domain = "General",
-      questionsAnswered = 0,
+      questionsAnswered: clientAnsweredCount = 0,
       currentQuestion: clientCurrentQuestion,
       integrityReport,
     } = req.body;
 
-    if (!sessionId || !answer)
-      return res.status(400).json({ message: "Missing required fields" });
+    if (!sessionId) {
+      return res.status(400).json({ message: "Session ID is required" });
+    }
+
+    // ── EDGE CASE 3: EMPTY ANSWER VALIDATION ──
+    const trimmedAnswer = (answer || "").trim();
+    if (!trimmedAnswer) {
+      return res.status(400).json({
+        isValid: false,
+        isEmpty: true,
+        message: "Please enter an answer before submitting, or click Skip to pass this question.",
+      });
+    }
 
     const interview = await Interview.findOne({
       _id: sessionId,
       userId: req.userId,
     });
-    if (!interview)
+    if (!interview) {
       return res.status(404).json({ message: "Session not found" });
+    }
 
     if (integrityReport) {
       interview.integrityReport = integrityReport;
     }
 
     const currentDifficulty = interview.currentDifficulty || "MEDIUM";
-    const isComplete = questionsAnswered >= 2; // Complete after 3 questions (0, 1, 2)
+    const totalProcessed = (interview.questionsAnswered || 0) + (interview.questionsSkipped || 0);
+    const isComplete = totalProcessed >= 2; // Complete after 3 questions (0, 1, 2)
 
     const apiKey = process.env.GROQ_API_KEY;
     const canUseGroq = apiKey && !apiKey.includes("placeholder") && apiKey.startsWith("gsk_");
@@ -805,8 +958,183 @@ const submitAnswer = async (req, res) => {
       }
     }
 
+    if (!interview.askedQuestions) interview.askedQuestions = [];
+    if (currentQuestion && !interview.askedQuestions.includes(currentQuestion)) {
+      interview.askedQuestions.push(currentQuestion);
+    }
+
+    // ── EDGE CASE 2: REPEATED ANSWER DETECTION ──
+    const previousCandidateAnswers = (interview.messages || [])
+      .filter((m) => m.role === "user" && !m.skipped && m.content)
+      .map((m) => m.content);
+
+    if (isRepeatedAnswer(trimmedAnswer, previousCandidateAnswers)) {
+      interview.repeatedAnswersCount = (interview.repeatedAnswersCount || 0) + 1;
+      // CRITICAL RULE: DO NOT DEMOTE DIFFICULTY! Preserve currentDifficulty!
+      const nextDifficulty = currentDifficulty;
+      const repeatedFeedback =
+        "You provided the same response as an earlier question in this session. In technical interviews, each question requires a distinct technical explanation. Let's move to a fresh question.";
+      interview.consecutiveFollowUps = 0;
+
+      let nextQ = "";
+      if (!isComplete) {
+        if (canUseGroq) {
+          try {
+            const groq = new Groq({ apiKey });
+            const avoidList = (interview.askedQuestions || []).map((q) => `"${q}"`).join(", ");
+            const nextQResponse = await groq.chat.completions.create({
+              model: "llama-3.3-70b-versatile",
+              messages: [
+                { role: "system", content: systemPrompt(domain, nextDifficulty) },
+                {
+                  role: "user",
+                  content: `The candidate repeated an answer given to an earlier question.
+The interview difficulty is maintained at: ${nextDifficulty}.
+Ask a fresh, different technical question strictly at ${nextDifficulty} difficulty for a ${domain} developer.
+Do NOT ask any of these already asked questions: [${avoidList}].
+Return ONLY the question, nothing else.`,
+                },
+              ],
+              temperature: 0.7,
+              max_tokens: 150,
+            });
+            nextQ = nextQResponse.choices[0]?.message?.content?.trim() || "";
+          } catch (groqErr) {
+            console.warn("Groq error on repeated answer transition:", groqErr.message);
+          }
+        }
+
+        if (!nextQ || (interview.askedQuestions || []).includes(nextQ)) {
+          nextQ = getNonDuplicateQuestion(domain, nextDifficulty, interview.askedQuestions, totalProcessed + 1);
+        }
+      }
+
+      if (nextQ && !interview.askedQuestions.includes(nextQ)) {
+        interview.askedQuestions.push(nextQ);
+      }
+
+      interview.questionsAnswered = (interview.questionsAnswered || 0) + 1;
+      recordDifficultyHistory(interview, {
+        questionIndex: totalProcessed + 1,
+        questionText: currentQuestion,
+        difficulty: currentDifficulty,
+        score: 0,
+        performance: "WEAK",
+        action: "NEW_QUESTION",
+        actionReason: "Candidate submitted a duplicate response from an earlier question. Current difficulty preserved.",
+        strengths: [],
+        weaknesses: ["Submitted a repeated answer from earlier in the interview"],
+        reasoning: "Candidate repeated an answer that was already submitted for another question.",
+        isFollowUp: false,
+        skipped: false,
+        repeatedAnswer: true,
+        candidateAnswer: trimmedAnswer,
+        feedback: repeatedFeedback,
+        timestamp: new Date(),
+      });
+
+      interview.messages.push({
+        role: "user",
+        content: trimmedAnswer,
+        timestamp: new Date(),
+        repeatedAnswer: true,
+        skipped: false,
+      });
+
+      interview.messages.push({
+        role: "ai",
+        content: repeatedFeedback,
+        timestamp: new Date(),
+        isQuestion: false,
+        isFollowUp: false,
+        assessment: {
+          score: 0,
+          strengths: [],
+          weaknesses: ["Submitted a repeated answer from earlier in the interview"],
+          reasoning: "Duplicate answer detected.",
+          action: "NEW_QUESTION",
+        },
+      });
+
+      if (!isComplete && nextQ) {
+        interview.currentQuestion = nextQ;
+        interview.messages.push({
+          role: "ai",
+          content: nextQ,
+          timestamp: new Date(),
+          isQuestion: true,
+          isFollowUp: false,
+        });
+      }
+
+      const validScores = interview.difficultyHistory
+        .filter((h) => !h.skipped && typeof h.score === "number")
+        .map((h) => h.score);
+      const avgScore =
+        validScores.length > 0
+          ? Math.round(validScores.reduce((a, b) => a + b, 0) / validScores.length)
+          : 0;
+
+      if (isComplete) {
+        interview.score = avgScore;
+        interview.isComplete = true;
+        interview.feedback = repeatedFeedback;
+        const durationMin = Math.max(
+          1,
+          Math.round((Date.now() - new Date(interview.createdAt).getTime()) / 60000)
+        );
+        interview.duration = durationMin;
+
+        await interview.save();
+        return res.json({
+          feedback: repeatedFeedback,
+          score: avgScore,
+          isComplete: true,
+          currentDifficulty: nextDifficulty,
+          previousDifficulty: currentDifficulty,
+          performance: "WEAK",
+          action: "NEW_QUESTION",
+          actionReason: "Candidate submitted a duplicate response. Maintained difficulty and concluded session.",
+          strengths: [],
+          weaknesses: ["Submitted a repeated answer from earlier in the interview"],
+          reasoning: "Candidate repeated an answer that was already submitted.",
+          isFollowUp: false,
+          repeatedAnswer: true,
+          repeatedAnswersCount: interview.repeatedAnswersCount,
+          questionsAnswered: interview.questionsAnswered,
+          questionsSkipped: interview.questionsSkipped,
+          totalQuestions: (interview.questionsAnswered || 0) + (interview.questionsSkipped || 0),
+          difficultyHistory: interview.difficultyHistory,
+          integrityReport: interview.integrityReport,
+        });
+      }
+
+      await interview.save();
+      return res.json({
+        feedback: repeatedFeedback,
+        nextQuestion: nextQ,
+        isComplete: false,
+        currentDifficulty: nextDifficulty,
+        previousDifficulty: currentDifficulty,
+        performance: "WEAK",
+        score: 0,
+        action: "NEW_QUESTION",
+        actionReason: "Candidate submitted a duplicate response. Current difficulty preserved.",
+        strengths: [],
+        weaknesses: ["Submitted a repeated answer from earlier in the interview"],
+        reasoning: "Candidate repeated an answer that was already submitted.",
+        isFollowUp: false,
+        repeatedAnswer: true,
+        repeatedAnswersCount: interview.repeatedAnswersCount,
+        questionsAnswered: interview.questionsAnswered,
+        questionsSkipped: interview.questionsSkipped,
+        totalQuestions: (interview.questionsAnswered || 0) + (interview.questionsSkipped || 0),
+        difficultyHistory: interview.difficultyHistory,
+      });
+    }
+
     // ── STEP 1: VALIDATE ANSWER BEFORE TECHNICAL EVALUATION ──
-    const validation = validateAnswer(answer, currentQuestion);
+    const validation = validateAnswer(trimmedAnswer, currentQuestion);
 
     // If answer is invalid (spam, keyboard mashing, repeated characters, greetings, or non-answers):
     if (!validation.isValid) {
@@ -834,6 +1162,7 @@ const submitAnswer = async (req, res) => {
         if (canUseGroq) {
           try {
             const groq = new Groq({ apiKey });
+            const avoidList = (interview.askedQuestions || []).map((q) => `"${q}"`).join(", ");
             const nextQResponse = await groq.chat.completions.create({
               model: "llama-3.3-70b-versatile",
               messages: [
@@ -846,6 +1175,7 @@ const submitAnswer = async (req, res) => {
                   content: `The candidate gave an invalid or non-answer to the previous question.
 The interview difficulty has adapted down to: ${nextDifficulty}.
 Ask the NEXT technical question strictly at ${nextDifficulty} difficulty for a ${domain} developer.
+Do NOT ask any of these already asked questions: [${avoidList}].
 Return ONLY the question, nothing else.`,
                 },
               ],
@@ -861,20 +1191,22 @@ Return ONLY the question, nothing else.`,
           }
         }
 
-        if (!nextQ) {
-          nextQ = getFallbackQuestion(domain, nextDifficulty, questionsAnswered + 1);
+        if (!nextQ || (interview.askedQuestions || []).includes(nextQ)) {
+          nextQ = getNonDuplicateQuestion(domain, nextDifficulty, interview.askedQuestions, totalProcessed + 1);
         }
+      }
+
+      if (nextQ && !interview.askedQuestions.includes(nextQ)) {
+        interview.askedQuestions.push(nextQ);
       }
 
       // Update Interview state in MongoDB
       interview.currentDifficulty = nextDifficulty;
-      interview.questionsAnswered = questionsAnswered + 1;
+      interview.questionsAnswered = (interview.questionsAnswered || 0) + 1;
 
-      if (!interview.difficultyHistory) {
-        interview.difficultyHistory = [];
-      }
-      interview.difficultyHistory.push({
-        questionIndex: questionsAnswered + 1,
+      recordDifficultyHistory(interview, {
+        questionIndex: totalProcessed + 1,
+        questionText: currentQuestion,
         difficulty: currentDifficulty,
         score: invalidScore,
         performance: invalidPerformance,
@@ -884,13 +1216,19 @@ Return ONLY the question, nothing else.`,
         weaknesses,
         reasoning,
         isFollowUp: false,
+        skipped: false,
+        repeatedAnswer: false,
+        candidateAnswer: trimmedAnswer,
+        feedback: invalidFeedback,
         timestamp: new Date(),
       });
 
       interview.messages.push({
         role: "user",
-        content: answer,
+        content: trimmedAnswer,
         timestamp: new Date(),
+        skipped: false,
+        repeatedAnswer: false,
       });
       interview.messages.push({
         role: "ai",
@@ -920,8 +1258,8 @@ Return ONLY the question, nothing else.`,
 
       if (isComplete) {
         const validScores = interview.difficultyHistory
-          .map((h) => h.score)
-          .filter((s) => typeof s === "number");
+          .filter((h) => !h.skipped && typeof h.score === "number")
+          .map((h) => h.score);
         const avgScore =
           validScores.length > 0
             ? Math.round(validScores.reduce((a, b) => a + b, 0) / validScores.length)
@@ -950,6 +1288,10 @@ Return ONLY the question, nothing else.`,
           weaknesses,
           reasoning,
           isFollowUp: false,
+          questionsAnswered: interview.questionsAnswered,
+          questionsSkipped: interview.questionsSkipped,
+          repeatedAnswersCount: interview.repeatedAnswersCount,
+          totalQuestions: (interview.questionsAnswered || 0) + (interview.questionsSkipped || 0),
           difficultyHistory: interview.difficultyHistory,
           integrityReport: interview.integrityReport,
         });
@@ -970,11 +1312,15 @@ Return ONLY the question, nothing else.`,
         weaknesses,
         reasoning,
         isFollowUp: false,
+        questionsAnswered: interview.questionsAnswered,
+        questionsSkipped: interview.questionsSkipped,
+        repeatedAnswersCount: interview.repeatedAnswersCount,
+        totalQuestions: (interview.questionsAnswered || 0) + (interview.questionsSkipped || 0),
         difficultyHistory: interview.difficultyHistory,
       });
     }
 
-    // ── STEP 2: TECHNICAL EVALUATION (FOR VALID ANSWERS) ──
+    // ── STEP 2: TECHNICAL EVALUATION (FOR VALID ANSWERS, INCLUDING VERY SHORT ANSWERS) ──
     const consecutiveFollowUps = interview.consecutiveFollowUps || 0;
     const forceNewQuestion = consecutiveFollowUps >= 1;
 
@@ -982,6 +1328,7 @@ Return ONLY the question, nothing else.`,
     if (canUseGroq) {
       try {
         const groq = new Groq({ apiKey });
+        const avoidList = (interview.askedQuestions || []).map((q) => `"${q}"`).join(", ");
 
         const evalPrompt = `You are a senior technical interviewer conducting an adaptive mock interview for a ${domain} developer.
 Current Question: "${currentQuestion}"
@@ -997,7 +1344,7 @@ Evaluate the candidate's answer thoroughly across 4 key dimensions:
 Scoring rubric (0-100):
 - 80-100: STRONG (accurate, detailed, handles nuances/trade-offs and mechanisms)
 - 50-79: AVERAGE (understands basic concept, mostly accurate, but lacks depth or misses key details)
-- 10-49: WEAK (valid attempt but incorrect, shallow, or missing core principles)
+- 20-49: WEAK (valid attempt but very short, shallow, or missing core principles. If the candidate gives an extremely brief 1-3 word answer such as 'yes', 'no', 'React', or 'Java', award 20-35 points with constructive feedback explaining that technical answers require operational depth and trade-offs)
 
 Next action decision ("action"):
 - Choose "FOLLOW_UP" or "NEW_QUESTION".
@@ -1012,6 +1359,7 @@ Next question ("nextQuestion"):
   * The follow-up question MUST match the candidate's adapted difficulty level (EASY: basic syntax/definition/simple example; MEDIUM: application/edge cases/practical constraints; HARD: internals/concurrency/scale).
 - If action is "NEW_QUESTION":
   * Ask a new technical question on a different topic in ${domain} at the adapted difficulty level.
+  * Do NOT ask any of these questions that were already asked in this session: [${avoidList}].
 
 Return strictly valid JSON with no markdown fences:
 {
@@ -1036,7 +1384,7 @@ Return strictly valid JSON with no markdown fences:
             { role: "system", content: evalPrompt },
             {
               role: "user",
-              content: `TARGET QUESTION TO EVALUATE AGAINST:\n"${currentQuestion}"\n\nCANDIDATE'S SUBMITTED ANSWER:\n"${answer}"\n\nCarefully evaluate this candidate's answer against the target question above. If the answer accurately addresses this specific target question, award an accurate technical score reflecting their technical knowledge and competence.`,
+              content: `TARGET QUESTION TO EVALUATE AGAINST:\n"${currentQuestion}"\n\nCANDIDATE'S SUBMITTED ANSWER:\n"${trimmedAnswer}"\n\nCarefully evaluate this candidate's answer against the target question above. If the answer accurately addresses this specific target question, award an accurate technical score reflecting their technical knowledge and competence.`,
             },
           ],
           temperature: 0.4,
@@ -1080,10 +1428,10 @@ Return strictly valid JSON with no markdown fences:
     } else {
       // Offline / smart evaluation fallback
       const evaluation = generateSmartFeedback(
-        answer,
+        trimmedAnswer,
         domain,
         currentDifficulty,
-        questionsAnswered,
+        totalProcessed,
         consecutiveFollowUps,
         currentQuestion
       );
@@ -1103,9 +1451,16 @@ Return strictly valid JSON with no markdown fences:
     // If not complete and nextQuestion is not yet determined:
     if (!isComplete && !nextQuestion) {
       if (action === "FOLLOW_UP") {
-        nextQuestion = getFallbackFollowUp(domain, nextDifficulty, questionsAnswered, answer, currentQuestion);
+        nextQuestion = getNonDuplicateFollowUp(domain, nextDifficulty, interview.askedQuestions, totalProcessed);
       } else {
-        nextQuestion = getFallbackQuestion(domain, nextDifficulty, questionsAnswered + 1);
+        nextQuestion = getNonDuplicateQuestion(domain, nextDifficulty, interview.askedQuestions, totalProcessed + 1);
+      }
+    } else if (!isComplete && nextQuestion && (interview.askedQuestions || []).includes(nextQuestion)) {
+      // Ensure AI-generated question doesn't duplicate a previously asked question
+      if (action === "FOLLOW_UP") {
+        nextQuestion = getNonDuplicateFollowUp(domain, nextDifficulty, interview.askedQuestions, totalProcessed);
+      } else {
+        nextQuestion = getNonDuplicateQuestion(domain, nextDifficulty, interview.askedQuestions, totalProcessed + 1);
       }
     }
 
@@ -1118,13 +1473,11 @@ Return strictly valid JSON with no markdown fences:
 
     // Update Interview state in MongoDB
     interview.currentDifficulty = nextDifficulty;
-    interview.questionsAnswered = questionsAnswered + 1;
+    interview.questionsAnswered = (interview.questionsAnswered || 0) + 1;
 
-    if (!interview.difficultyHistory) {
-      interview.difficultyHistory = [];
-    }
-    interview.difficultyHistory.push({
-      questionIndex: questionsAnswered + 1,
+    recordDifficultyHistory(interview, {
+      questionIndex: totalProcessed + 1,
+      questionText: currentQuestion,
       difficulty: currentDifficulty,
       score,
       performance,
@@ -1134,13 +1487,19 @@ Return strictly valid JSON with no markdown fences:
       weaknesses,
       reasoning,
       isFollowUp: action === "FOLLOW_UP",
+      skipped: false,
+      repeatedAnswer: false,
+      candidateAnswer: trimmedAnswer,
+      feedback,
       timestamp: new Date(),
     });
 
     interview.messages.push({
       role: "user",
-      content: answer,
+      content: trimmedAnswer,
       timestamp: new Date(),
+      skipped: false,
+      repeatedAnswer: false,
     });
     interview.messages.push({
       role: "ai",
@@ -1158,6 +1517,9 @@ Return strictly valid JSON with no markdown fences:
     });
 
     if (!isComplete && nextQuestion) {
+      if (nextQuestion && !interview.askedQuestions.includes(nextQuestion)) {
+        interview.askedQuestions.push(nextQuestion);
+      }
       interview.currentQuestion = nextQuestion;
       interview.messages.push({
         role: "ai",
@@ -1170,8 +1532,8 @@ Return strictly valid JSON with no markdown fences:
 
     if (isComplete) {
       const validScores = interview.difficultyHistory
-        .map((h) => h.score)
-        .filter((s) => typeof s === "number");
+        .filter((h) => !h.skipped && typeof h.score === "number")
+        .map((h) => h.score);
       const avgScore =
         validScores.length > 0
           ? Math.round(validScores.reduce((a, b) => a + b, 0) / validScores.length)
@@ -1200,6 +1562,10 @@ Return strictly valid JSON with no markdown fences:
         weaknesses,
         reasoning,
         isFollowUp: action === "FOLLOW_UP",
+        questionsAnswered: interview.questionsAnswered,
+        questionsSkipped: interview.questionsSkipped,
+        repeatedAnswersCount: interview.repeatedAnswersCount,
+        totalQuestions: (interview.questionsAnswered || 0) + (interview.questionsSkipped || 0),
         difficultyHistory: interview.difficultyHistory,
         integrityReport: interview.integrityReport,
       });
@@ -1220,6 +1586,10 @@ Return strictly valid JSON with no markdown fences:
       weaknesses,
       reasoning,
       isFollowUp: action === "FOLLOW_UP",
+      questionsAnswered: interview.questionsAnswered,
+      questionsSkipped: interview.questionsSkipped,
+      repeatedAnswersCount: interview.repeatedAnswersCount,
+      totalQuestions: (interview.questionsAnswered || 0) + (interview.questionsSkipped || 0),
       difficultyHistory: interview.difficultyHistory,
     });
   } catch (err) {
@@ -1230,6 +1600,208 @@ Return strictly valid JSON with no markdown fences:
   }
 };
 
+// ── Skip Question ─────────────────────────────────────────
+const skipQuestion = async (req, res) => {
+  try {
+    const {
+      sessionId,
+      domain = "General",
+      currentQuestion: clientCurrentQuestion,
+      integrityReport,
+    } = req.body;
+
+    if (!sessionId) {
+      return res.status(400).json({ message: "Session ID is required" });
+    }
+
+    const interview = await Interview.findOne({
+      _id: sessionId,
+      userId: req.userId,
+    });
+    if (!interview) {
+      return res.status(404).json({ message: "Session not found" });
+    }
+
+    if (integrityReport) {
+      interview.integrityReport = integrityReport;
+    }
+
+    let currentQuestion = (clientCurrentQuestion || "").trim();
+    if (!currentQuestion) {
+      if (interview.currentQuestion) {
+        currentQuestion = interview.currentQuestion;
+      } else if (interview.messages && interview.messages.length > 0) {
+        for (let i = interview.messages.length - 1; i >= 0; i--) {
+          const m = interview.messages[i];
+          if (m.role === "ai" && m.isQuestion && m.content) {
+            currentQuestion = m.content;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!interview.askedQuestions) interview.askedQuestions = [];
+    if (currentQuestion && !interview.askedQuestions.includes(currentQuestion)) {
+      interview.askedQuestions.push(currentQuestion);
+    }
+
+    interview.questionsSkipped = (interview.questionsSkipped || 0) + 1;
+    const totalProcessed = (interview.questionsAnswered || 0) + interview.questionsSkipped;
+    const isComplete = totalProcessed >= 3;
+
+    // CRITICAL RULE: Skipping does NOT decrease difficulty! Difficulty is preserved!
+    const currentDifficulty = interview.currentDifficulty || "MEDIUM";
+    const nextDifficulty = currentDifficulty;
+
+    const skipFeedback = "Question skipped. Moving on to the next question.";
+    interview.consecutiveFollowUps = 0;
+
+    let nextQ = "";
+    if (!isComplete) {
+      const apiKey = process.env.GROQ_API_KEY;
+      const canUseGroq = apiKey && !apiKey.includes("placeholder") && apiKey.startsWith("gsk_");
+      if (canUseGroq) {
+        try {
+          const groq = new Groq({ apiKey });
+          const avoidList = (interview.askedQuestions || []).map((q) => `"${q}"`).join(", ");
+          const nextQResponse = await groq.chat.completions.create({
+            model: "llama-3.3-70b-versatile",
+            messages: [
+              { role: "system", content: systemPrompt(domain, nextDifficulty) },
+              {
+                role: "user",
+                content: `Candidate skipped the question. Ask a fresh, different technical question at ${nextDifficulty} difficulty for a ${domain} developer.
+Do NOT ask any of these already asked/skipped questions: [${avoidList}].
+Return ONLY the question, nothing else.`,
+              },
+            ],
+            temperature: 0.7,
+            max_tokens: 150,
+          });
+          nextQ = nextQResponse.choices[0]?.message?.content?.trim() || "";
+        } catch (groqErr) {
+          console.warn("Groq error in skipQuestion, using question bank:", groqErr.message);
+        }
+      }
+
+      if (!nextQ || (interview.askedQuestions || []).includes(nextQ)) {
+        nextQ = getNonDuplicateQuestion(domain, nextDifficulty, interview.askedQuestions, totalProcessed);
+      }
+    }
+
+    if (nextQ && !interview.askedQuestions.includes(nextQ)) {
+      interview.askedQuestions.push(nextQ);
+    }
+
+    recordDifficultyHistory(interview, {
+      questionIndex: totalProcessed,
+      questionText: currentQuestion,
+      difficulty: currentDifficulty,
+      score: 0,
+      performance: "WEAK",
+      action: "SKIP",
+      actionReason: "Candidate chose to skip this question. Current difficulty preserved.",
+      strengths: [],
+      weaknesses: ["Question was skipped by candidate"],
+      reasoning: "Question was skipped by candidate.",
+      isFollowUp: false,
+      skipped: true,
+      repeatedAnswer: false,
+      candidateAnswer: "[Skipped Question]",
+      feedback: skipFeedback,
+      timestamp: new Date(),
+    });
+
+    interview.messages.push({
+      role: "user",
+      content: "[Skipped Question]",
+      timestamp: new Date(),
+      skipped: true,
+      repeatedAnswer: false,
+    });
+
+    interview.messages.push({
+      role: "ai",
+      content: skipFeedback,
+      timestamp: new Date(),
+      isQuestion: false,
+      assessment: {
+        score: 0,
+        strengths: [],
+        weaknesses: ["Question was skipped by candidate"],
+        reasoning: "Question skipped.",
+        action: "SKIP",
+      },
+    });
+
+    if (!isComplete && nextQ) {
+      interview.currentQuestion = nextQ;
+      interview.messages.push({
+        role: "ai",
+        content: nextQ,
+        timestamp: new Date(),
+        isQuestion: true,
+        isFollowUp: false,
+      });
+    }
+
+    // Average score across non-skipped questions only
+    const validScores = interview.difficultyHistory
+      .filter((h) => !h.skipped && typeof h.score === "number")
+      .map((h) => h.score);
+    const avgScore =
+      validScores.length > 0
+        ? Math.round(validScores.reduce((a, b) => a + b, 0) / validScores.length)
+        : 0;
+
+    if (isComplete) {
+      interview.score = avgScore;
+      interview.isComplete = true;
+      interview.feedback = skipFeedback;
+      const durationMin = Math.max(
+        1,
+        Math.round((Date.now() - new Date(interview.createdAt).getTime()) / 60000)
+      );
+      interview.duration = durationMin;
+
+      await interview.save();
+      return res.json({
+        feedback: skipFeedback,
+        score: avgScore,
+        isComplete: true,
+        currentDifficulty: nextDifficulty,
+        previousDifficulty: currentDifficulty,
+        skipped: true,
+        questionsSkipped: interview.questionsSkipped,
+        questionsAnswered: interview.questionsAnswered,
+        repeatedAnswersCount: interview.repeatedAnswersCount,
+        totalQuestions: totalProcessed,
+        difficultyHistory: interview.difficultyHistory,
+        integrityReport: interview.integrityReport,
+      });
+    }
+
+    await interview.save();
+    return res.json({
+      feedback: skipFeedback,
+      nextQuestion: nextQ,
+      isComplete: false,
+      currentDifficulty: nextDifficulty,
+      previousDifficulty: currentDifficulty,
+      skipped: true,
+      questionsSkipped: interview.questionsSkipped,
+      questionsAnswered: interview.questionsAnswered,
+      repeatedAnswersCount: interview.repeatedAnswersCount,
+      totalQuestions: totalProcessed,
+      difficultyHistory: interview.difficultyHistory,
+    });
+  } catch (err) {
+    console.error("skipQuestion error:", err);
+    res.status(500).json({ message: "Failed to skip question", error: err.message });
+  }
+};
+
 // ── Get All Completed Interviews ──────────────────────────
 const getInterviews = async (req, res) => {
   try {
@@ -1237,7 +1809,8 @@ const getInterviews = async (req, res) => {
       userId: req.userId,
       isComplete: true,
     })
-      .select("domain score duration questionsAnswered currentDifficulty difficultyHistory createdAt")
+      .select("domain score duration questionsAnswered questionsSkipped repeatedAnswersCount currentDifficulty difficultyHistory createdAt")
+      .populate("userId", "name email")
       .sort({ createdAt: -1 });
 
     const mapped = interviews.map((i) => ({
@@ -1245,8 +1818,13 @@ const getInterviews = async (req, res) => {
       topic: i.domain,
       score: i.score,
       duration: i.duration,
+      questionsAnswered: i.questionsAnswered,
+      questionsSkipped: i.questionsSkipped,
+      repeatedAnswersCount: i.repeatedAnswersCount,
       currentDifficulty: i.currentDifficulty || "MEDIUM",
       difficultyHistory: i.difficultyHistory || [],
+      candidateName: i.userId?.name || "Candidate",
+      candidateEmail: i.userId?.email || "",
       date: i.createdAt,
     }));
 
@@ -1264,7 +1842,7 @@ const getInterview = async (req, res) => {
     const interview = await Interview.findOne({
       _id: req.params.id,
       userId: req.userId,
-    });
+    }).populate("userId", "name email");
     if (!interview)
       return res.status(404).json({ message: "Interview not found" });
     res.json({ interview });
@@ -1348,6 +1926,7 @@ const terminateInterview = async (req, res) => {
 module.exports = {
   startInterview,
   submitAnswer,
+  skipQuestion,
   terminateInterview,
   getInterviews,
   getInterview,
@@ -1356,6 +1935,9 @@ module.exports = {
   classifyPerformance,
   getFallbackQuestion,
   getFallbackFollowUp,
+  getNonDuplicateQuestion,
+  getNonDuplicateFollowUp,
+  isRepeatedAnswer,
   generateSmartFeedback,
   QUESTION_BANK,
   FOLLOW_UP_BANK,

@@ -6,6 +6,10 @@ import { useAuth } from "@/hooks/useAuth";
 import axiosInstance from "@/lib/axios";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import {
+  AdaptiveReportCard,
+  DifficultyHistoryItem,
+} from "@/components/interview/AdaptiveReportCard";
 import { useEffect, useState } from "react";
 
 interface Interview {
@@ -14,6 +18,54 @@ interface Interview {
   score: number;
   duration: number;
   topic: string;
+}
+
+function getSessionDifficultyHistory(session: any): DifficultyHistoryItem[] {
+  if (
+    session?.difficultyHistory &&
+    Array.isArray(session.difficultyHistory) &&
+    session.difficultyHistory.length > 0
+  ) {
+    return session.difficultyHistory;
+  }
+
+  // Synthesize from messages if difficultyHistory is not present
+  const items: DifficultyHistoryItem[] = [];
+  const msgs = session?.messages || [];
+  let currentQ = "";
+  let currentDiff: "EASY" | "MEDIUM" | "HARD" = (session?.currentDifficulty as any) || "MEDIUM";
+  let qIdx = 0;
+
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    if (m.role === "ai" && m.isQuestion && m.content) {
+      qIdx++;
+      currentQ = m.content;
+      if (m.difficulty) currentDiff = m.difficulty;
+    } else if (m.role === "user") {
+      const nextAiMsg = msgs[i + 1];
+      const isSkipped = m.skipped || m.content === "[Skipped Question]";
+      items.push({
+        questionIndex: qIdx || items.length + 1,
+        questionText: currentQ || `Question ${items.length + 1}`,
+        candidateAnswer: m.content,
+        difficulty: currentDiff,
+        score: isSkipped ? 0 : nextAiMsg?.assessment?.score ?? (session?.score || 70),
+        performance: isSkipped ? "WEAK" : (session?.score >= 80 ? "STRONG" : session?.score >= 50 ? "AVERAGE" : "WEAK"),
+        action: isSkipped ? "SKIP" : nextAiMsg?.assessment?.action || "NEW_QUESTION",
+        actionReason: nextAiMsg?.assessment?.actionReason || "",
+        strengths: nextAiMsg?.assessment?.strengths || [],
+        weaknesses: nextAiMsg?.assessment?.weaknesses || [],
+        reasoning: nextAiMsg?.assessment?.reasoning || "",
+        feedback: nextAiMsg?.content || "",
+        isFollowUp: Boolean(m.isFollowUp || nextAiMsg?.isFollowUp),
+        skipped: isSkipped,
+        repeatedAnswer: Boolean(m.repeatedAnswer),
+      });
+    }
+  }
+
+  return items;
 }
 
 const DOMAIN_ICONS: Record<string, string> = {
@@ -35,6 +87,7 @@ export default function HistoryPage() {
   const [filterDomain, setFilterDomain] = useState("All");
   const [selectedSession, setSelectedSession] = useState<any | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const [modalTab, setModalTab] = useState<"report" | "transcript">("report");
 
   useEffect(() => {
     if (!authLoading && !isLoggedIn) {
@@ -65,6 +118,7 @@ export default function HistoryPage() {
       setLoadingDetails(true);
       const { data } = await axiosInstance.get(`/api/interviews/${id}`);
       setSelectedSession(data.interview);
+      setModalTab("report");
     } catch (err) {
       console.error("Failed to load details", err);
     } finally {
@@ -252,22 +306,24 @@ export default function HistoryPage() {
         {/* Details Modal */}
         {selectedSession && (
           <div
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4"
             onClick={(e) => {
               if (e.target === e.currentTarget) setSelectedSession(null);
             }}
           >
-            <Card className="w-full max-w-2xl max-h-[85vh] flex flex-col p-6 border border-border shadow-2xl overflow-hidden">
-              <div className="flex items-center justify-between pb-4 border-b border-border/60 flex-shrink-0">
+            <Card className="w-full max-w-5xl max-h-[92vh] flex flex-col p-4 sm:p-6 border border-zinc-800 bg-zinc-950 shadow-2xl overflow-hidden rounded-2xl">
+              {/* Modal Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-zinc-800 flex-shrink-0">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-xl">
+                  <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-xl flex-shrink-0">
                     {DOMAIN_ICONS[selectedSession.domain] || "🎯"}
                   </div>
                   <div>
-                    <h3 className="text-lg font-bold text-foreground">
-                      {selectedSession.domain} Session Details
+                    <h3 className="text-base sm:text-lg font-bold text-white">
+                      {selectedSession.domain} Interview Details
                     </h3>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-zinc-400">
+                      Candidate: {selectedSession.userId?.name || "Candidate"} ·{" "}
                       {new Date(selectedSession.createdAt).toLocaleDateString("en-IN", {
                         day: "numeric",
                         month: "short",
@@ -277,45 +333,81 @@ export default function HistoryPage() {
                     </p>
                   </div>
                 </div>
-                <button
-                  onClick={() => setSelectedSession(null)}
-                  className="w-8 h-8 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors text-sm"
-                >
-                  ✕
-                </button>
+
+                {/* View Switcher Tabs & Close Button */}
+                <div className="flex items-center gap-2 self-end sm:self-auto">
+                  <div className="flex p-1 bg-zinc-900 border border-zinc-800 rounded-xl">
+                    <button
+                      onClick={() => setModalTab("report")}
+                      className={`text-xs px-3 py-1 rounded-lg font-bold transition-all ${
+                        modalTab === "report"
+                          ? "bg-emerald-500 text-black shadow-sm"
+                          : "text-zinc-400 hover:text-white"
+                      }`}
+                    >
+                      📊 Adaptive Report
+                    </button>
+                    <button
+                      onClick={() => setModalTab("transcript")}
+                      className={`text-xs px-3 py-1 rounded-lg font-bold transition-all ${
+                        modalTab === "transcript"
+                          ? "bg-zinc-800 text-white shadow-sm"
+                          : "text-zinc-400 hover:text-white"
+                      }`}
+                    >
+                      💬 Transcript
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={() => setSelectedSession(null)}
+                    className="w-8 h-8 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white transition-colors text-sm flex-shrink-0"
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto py-4 space-y-4 pr-1">
-                <div className="flex items-center justify-between p-4 bg-muted/30 border border-border/50 rounded-xl">
-                  <div>
-                    <p className="text-xs text-muted-foreground font-medium">
-                      Performance Score
-                    </p>
-                    <p className="text-2xl font-black text-primary">
-                      {selectedSession.score}%
-                    </p>
-                  </div>
-                  <span className="text-xs font-bold px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
-                    {selectedSession.score >= 80 ? "Excellent" : selectedSession.score >= 60 ? "Good" : "Needs Practice"}
-                  </span>
-                </div>
-
-                {selectedSession.feedback && (
-                  <div className="p-4 bg-primary/[0.03] border border-primary/20 rounded-xl">
-                    <p className="text-xs font-bold text-foreground mb-1">
-                      Overall Evaluation
-                    </p>
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      {selectedSession.feedback}
-                    </p>
-                  </div>
-                )}
-
-                <div>
-                  <p className="text-xs font-bold text-foreground mb-3">
-                    Session Conversation
-                  </p>
+              {/* Modal Body */}
+              <div className="flex-1 overflow-y-auto py-4 pr-1">
+                {modalTab === "report" ? (
+                  <AdaptiveReportCard
+                    candidateName={selectedSession.userId?.name || "Candidate"}
+                    candidateEmail={selectedSession.userId?.email || ""}
+                    role={selectedSession.domain}
+                    totalQuestions={
+                      (selectedSession.questionsAnswered || 0) + (selectedSession.questionsSkipped || 0) ||
+                      selectedSession.difficultyHistory?.length ||
+                      3
+                    }
+                    questionsAnswered={selectedSession.questionsAnswered || 0}
+                    questionsSkipped={selectedSession.questionsSkipped || 0}
+                    repeatedAnswersCount={selectedSession.repeatedAnswersCount || 0}
+                    startingDifficulty={
+                      selectedSession.difficultyHistory?.[0]?.difficulty || "MEDIUM"
+                    }
+                    finalDifficulty={
+                      selectedSession.currentDifficulty ||
+                      selectedSession.difficultyHistory?.[selectedSession.difficultyHistory.length - 1]?.difficulty ||
+                      "MEDIUM"
+                    }
+                    score={selectedSession.score || 0}
+                    durationMinutes={selectedSession.duration || 0}
+                    difficultyHistory={getSessionDifficultyHistory(selectedSession)}
+                    integrityReport={selectedSession.integrityReport}
+                    feedback={selectedSession.feedback}
+                    isModal={true}
+                    onRetake={() => {
+                      const dom = selectedSession.domain;
+                      setSelectedSession(null);
+                      handleRetake(dom);
+                    }}
+                  />
+                ) : (
                   <div className="space-y-3">
+                    <p className="text-xs font-bold text-foreground mb-2">
+                      Full Session Transcript
+                    </p>
                     {selectedSession.messages?.map((msg: any, idx: number) => (
                       <div
                         key={idx}
@@ -327,17 +419,33 @@ export default function HistoryPage() {
                       >
                         <div className="flex items-center gap-2 mb-1.5 font-semibold">
                           <span>
-                            {msg.role === "user" ? "👤 You" : "🤖 AI Interviewer"}
+                            {msg.role === "user" ? "👤 Candidate" : "🤖 AI Interviewer"}
                           </span>
+                          {msg.isQuestion && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 font-mono">
+                              Question
+                            </span>
+                          )}
+                          {msg.isFollowUp && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono">
+                              Follow-Up
+                            </span>
+                          )}
+                          {msg.skipped && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono">
+                              Skipped
+                            </span>
+                          )}
                         </div>
                         <p className="text-foreground whitespace-pre-wrap">{msg.content}</p>
                       </div>
                     ))}
                   </div>
-                </div>
+                )}
               </div>
 
-              <div className="pt-4 border-t border-border/60 flex items-center justify-end gap-3 flex-shrink-0">
+              {/* Modal Footer */}
+              <div className="pt-4 border-t border-zinc-800 flex items-center justify-end gap-3 flex-shrink-0">
                 <Button
                   variant="outline"
                   size="sm"
@@ -348,7 +456,7 @@ export default function HistoryPage() {
                 </Button>
                 <Button
                   size="sm"
-                  className="rounded-full text-xs bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white font-semibold"
+                  className="rounded-full text-xs bg-gradient-to-r from-emerald-500 to-teal-600 hover:opacity-90 text-white font-semibold"
                   onClick={() => {
                     const dom = selectedSession.domain;
                     setSelectedSession(null);
