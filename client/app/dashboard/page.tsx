@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import axiosInstance from "@/lib/axios";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import ReadinessDashboard from "@/components/readiness/ReadinessDashboard";
 
 import {
   CheckCircle2,
@@ -1096,7 +1097,7 @@ const page = () => {
   const [ShowDomainSelector, setShowDomainSelector] = useState(false);
   const [hoveredDomain, setHoveredDomain] = useState<string | null>(null);
   const [filterDomain, setFilterDomain] = useState<String>("All");
-  const [activeTab, setActiveTab] = useState<"history" | "resume">("history");
+  const [activeTab, setActiveTab] = useState<"readiness" | "history" | "resume">("readiness");
   const [selectedSession, setSelectedSession] = useState<any | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
 
@@ -1276,7 +1277,7 @@ const page = () => {
         )}
         <section>
           <div className="flex items-center gap-1 mb-6 border-b border-border/50">
-            {(["history", "resume"] as const).map((tab) => (
+            {(["readiness", "history", "resume"] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -1286,7 +1287,9 @@ const page = () => {
                     : "border-transparent text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {tab === "history"
+                {tab === "readiness"
+                  ? "🎯 Placement Readiness"
+                  : tab === "history"
                   ? "📋 Interview History"
                   : "📄 Resume Analysis"}
               </button>
@@ -1442,6 +1445,13 @@ const page = () => {
                 </div>
               )}
             </div>
+          )}
+          {activeTab === "readiness" && (
+            <ReadinessDashboard
+              candidateId={user?.id || (user as any)?._id}
+              onNavigateToInterview={() => setShowDomainSelector(true)}
+              onNavigateToResume={() => setActiveTab("resume")}
+            />
           )}
           {activeTab === "resume" && (
             <ResumePanel onDomainSelect={handleSelectDomain} />

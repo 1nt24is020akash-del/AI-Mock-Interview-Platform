@@ -46,6 +46,24 @@ const CANDIDATE_TYPES = Object.freeze([
 
 const DEFAULT_CANDIDATE_TYPE = "fresher";
 
+// Standard Skill Assessment Domains
+const SKILL_ASSESSMENT_DOMAINS = Object.freeze([
+  "DSA",
+  "DBMS",
+  "OOP",
+  "OS",
+  "CN",
+  "Programming",
+  "Cloud",
+  "AI/ML",
+]);
+
+// Skill tier thresholds: >=80 Strong, 60-79 Moderate, <60 Weak
+const SKILL_TIER_THRESHOLDS = Object.freeze({
+  strong: 80,
+  moderate: 60,
+});
+
 module.exports = {
   READINESS_WEIGHTS,
   READINESS_THRESHOLDS,
@@ -53,4 +71,6 @@ module.exports = {
   WEAK_AREA_THRESHOLDS,
   CANDIDATE_TYPES,
   DEFAULT_CANDIDATE_TYPE,
+  SKILL_ASSESSMENT_DOMAINS,
+  SKILL_TIER_THRESHOLDS,
 };

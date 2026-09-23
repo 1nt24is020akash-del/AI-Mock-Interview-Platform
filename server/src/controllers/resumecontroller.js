@@ -1151,6 +1151,38 @@ JSON Schema:
             ...(parsed.skills?.toolsAndOthers || []),
           ].slice(0, 15);
 
+          if (req.userId) {
+            try {
+              const Resume = require("../models/Resume.js");
+              await Resume.findOneAndUpdate(
+                { userId: req.userId },
+                {
+                  userId: req.userId,
+                  fileName: req.file?.originalname || "resume.pdf",
+                  resumeScore: parsed.resumeQuality?.overallScore || 0,
+                  skills: parsed.skillsDetected || [],
+                  categorizedSkills: parsed.skills || {},
+                  projects: parsed.projects || [],
+                  education:
+                    typeof parsed.education === "string"
+                      ? parsed.education
+                      : parsed.education?.[0]?.degree || "",
+                  educationList: Array.isArray(parsed.education) ? parsed.education : [],
+                  experience: Array.isArray(parsed.experience) ? parsed.experience : [],
+                  certifications: Array.isArray(parsed.certifications)
+                    ? parsed.certifications.map((c) => (typeof c === "string" ? c : c.name || ""))
+                    : [],
+                  missingSkills: parsed.missingInformation || parsed.improvements || [],
+                  rawAnalysis: parsed,
+                  updatedAt: new Date(),
+                },
+                { upsert: true, new: true }
+              );
+            } catch (saveErr) {
+              console.warn("Could not persist AI resume analysis to MongoDB:", saveErr.message);
+            }
+          }
+
           return res.json({ analysis: parsed, message: "Analysis complete" });
         }
       } catch (groqErr) {
@@ -1160,6 +1192,39 @@ JSON Schema:
 
     // Tier 2: High-Precision Deterministic Analysis Fallback
     const analysis = performDeterministicAnalysis(resumeText);
+
+    if (req.userId) {
+      try {
+        const Resume = require("../models/Resume.js");
+        await Resume.findOneAndUpdate(
+          { userId: req.userId },
+          {
+            userId: req.userId,
+            fileName: req.file?.originalname || "resume.pdf",
+            resumeScore: analysis.resumeQuality?.overallScore || 0,
+            skills: analysis.skillsDetected || [],
+            categorizedSkills: analysis.skills || {},
+            projects: analysis.projects || [],
+            education:
+              typeof analysis.education === "string"
+                ? analysis.education
+                : analysis.education?.[0]?.degree || "",
+            educationList: Array.isArray(analysis.education) ? analysis.education : [],
+            experience: Array.isArray(analysis.experience) ? analysis.experience : [],
+            certifications: Array.isArray(analysis.certifications)
+              ? analysis.certifications.map((c) => (typeof c === "string" ? c : c.name || ""))
+              : [],
+            missingSkills: analysis.missingInformation || analysis.improvements || [],
+            rawAnalysis: analysis,
+            updatedAt: new Date(),
+          },
+          { upsert: true, new: true }
+        );
+      } catch (saveErr) {
+        console.warn("Could not persist deterministic resume analysis to MongoDB:", saveErr.message);
+      }
+    }
+
     return res.json({ analysis, message: "Analysis complete" });
   } catch (error) {
     console.error("Error analyzing resume:", error);
