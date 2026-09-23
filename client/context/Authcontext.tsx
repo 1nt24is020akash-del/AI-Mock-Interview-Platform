@@ -70,7 +70,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setTokenState(data.token);
         setUser(data.user);
 
-        router.push("/dashboard");
+        if (typeof window !== "undefined") {
+          window.location.href = "/dashboard";
+        } else {
+          router.push("/dashboard");
+        }
       } finally {
         setIsLoading(false);
       }
@@ -94,7 +98,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setTokenState(data.token);
         setUser(data.user);
 
-        router.push("/dashboard");
+        if (typeof window !== "undefined") {
+          window.location.href = "/dashboard";
+        } else {
+          router.push("/dashboard");
+        }
       } finally {
         setIsLoading(false);
       }
@@ -107,7 +115,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     clearAuth();
     setTokenState(null);
     setUser(null);
-    router.push("/");
+    if (typeof window !== "undefined") {
+      window.location.href = "/";
+    } else {
+      router.push("/");
+    }
   }, [router]);
 
   // ── Refresh user from API ───────────────────────────────

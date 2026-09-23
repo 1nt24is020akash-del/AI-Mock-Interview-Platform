@@ -28,8 +28,19 @@ axiosInstance.interceptors.response.use(
     (response) => response,
     (error) => {
         if (error.response?.status === 401) {
-            // Clear stale auth data and redirect to login
-            if (typeof window !== 'undefined') {
+            const requestUrl = error.config?.url || '';
+            const isAuthRoute =
+                requestUrl.includes('/api/auth/login') ||
+                requestUrl.includes('/api/auth/register');
+
+            // Only redirect if this was NOT a login/register attempt,
+            // and the browser is not already on an authentication page
+            if (
+                !isAuthRoute &&
+                typeof window !== 'undefined' &&
+                window.location.pathname !== '/login' &&
+                window.location.pathname !== '/register'
+            ) {
                 localStorage.removeItem('token');
                 localStorage.removeItem('user');
                 window.location.href = '/login';

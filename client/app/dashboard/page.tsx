@@ -1102,7 +1102,8 @@ const page = () => {
   const [loadingDetails, setLoadingDetails] = useState(false);
 
   useEffect(() => {
-    if (!authLoading && !isLoggedIn) {
+    const hasLocalToken = typeof window !== "undefined" && !!localStorage.getItem("token");
+    if (!authLoading && !isLoggedIn && !hasLocalToken) {
       router.push("/login");
     }
   }, [isLoggedIn, authLoading, router]);
@@ -1135,7 +1136,8 @@ const page = () => {
   const handleSelectDomain = (domain: string) => {
     router.push(`/interview?domain=${encodeURIComponent(domain)}`);
   };
-  if (authLoading) {
+  const hasToken = typeof window !== "undefined" && !!localStorage.getItem("token");
+  if (authLoading || (!isLoggedIn && hasToken)) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
@@ -1145,7 +1147,7 @@ const page = () => {
       </div>
     );
   }
-  if (!isLoggedIn) return null;
+  if (!isLoggedIn && !hasToken) return null;
 
   const avgScore = interviews.length
     ? Math.round(

@@ -4,15 +4,29 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/useAuth";
 import Link from "next/link";
-import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import React, { useEffect, useState } from "react";
 
 const page = () => {
+  const router = useRouter();
   const [formData, setFormData] = useState({
     email: "",
     password: "",
   });
-  const { login, isLoading } = useAuth();
+  const { login, isLoading, isLoggedIn } = useAuth();
   const [error, setError] = useState("");
+
+  // Automatically redirect to dashboard if already authenticated
+  useEffect(() => {
+    if (isLoggedIn) {
+      if (typeof window !== "undefined") {
+        window.location.href = "/dashboard";
+      } else {
+        router.replace("/dashboard");
+      }
+    }
+  }, [isLoggedIn, router]);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData({ ...formData, [name]: value });
@@ -27,6 +41,11 @@ const page = () => {
     }
     try {
       await login(formData.email.trim(), formData.password);
+      if (typeof window !== "undefined") {
+        window.location.href = "/dashboard";
+      } else {
+        router.push("/dashboard");
+      }
     } catch (err: any) {
       setError(
         err?.response?.data?.message ||
