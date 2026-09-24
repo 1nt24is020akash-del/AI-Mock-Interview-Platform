@@ -7,12 +7,28 @@ const {
   generateRoadmap,
   getRoadmap,
   updateCandidateType,
+  getCurrentReadinessEndpoint,
+  getReadinessHistoryEndpoint,
+  calculateReadinessEndpoint,
+  recordReadinessHistoryEndpoint,
 } = require("../controllers/readinesscontroller.js");
 const { optionalProtect } = require("../middleware/optionalAuth.js");
 
 const router = express.Router();
 
-// POST /api/readiness/analyze - Pure mathematical evaluation & classification
+// GET /api/readiness/current - Current readiness score, breakdown, category, weak/strong areas
+router.get("/current", optionalProtect, getCurrentReadinessEndpoint);
+
+// GET /api/readiness/history - Historical tracking snapshots and progress line data
+router.get("/history", optionalProtect, getReadinessHistoryEndpoint);
+
+// POST /api/readiness/calculate - Pure mathematical evaluation using standard formula
+router.post("/calculate", optionalProtect, calculateReadinessEndpoint);
+
+// POST /api/readiness/history - Record historical snapshot
+router.post("/history", optionalProtect, recordReadinessHistoryEndpoint);
+
+// POST /api/readiness/analyze - Pure mathematical evaluation & classification (Day 1 legacy compatibility)
 router.post("/analyze", optionalProtect, analyzeCandidateReadiness);
 
 // GET /api/readiness/candidate - Unified Readiness Data for current authenticated candidate

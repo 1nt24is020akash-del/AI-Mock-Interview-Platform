@@ -36,8 +36,10 @@ export function Navbar() {
   const navLinks = isLoggedIn
     ? [
         { href: "/dashboard", label: "Dashboard", icon: "⚡" },
-        { href: "/practice", label: "Practice", icon: "🎯" },
-        { href: "/history", label: "My Sessions", icon: "📊" },
+        { href: "/practice", label: "Interview", icon: "🎯" },
+        { href: "/readiness", label: "Placement Readiness", icon: "🎯" },
+        { href: "/progress-history", label: "Progress History", icon: "📈" },
+        { href: "/history", label: "Reports", icon: "📊" },
       ]
     : [
         { href: "/#features", label: "Features", icon: "✨" },
@@ -227,7 +229,10 @@ export function Navbar() {
               <div className="grid grid-cols-2 gap-2 px-1">
                 {[
                   { href: "/dashboard", label: "Dashboard", icon: "⚡" },
-                  { href: "/history", label: "History", icon: "📊" },
+                  { href: "/practice", label: "Interview", icon: "🎯" },
+                  { href: "/readiness", label: "Readiness", icon: "🎯" },
+                  { href: "/progress-history", label: "Progress", icon: "📈" },
+                  { href: "/history", label: "Reports", icon: "📊" },
                 ].map((item) => (
                   <Link key={item.href} href={item.href}>
                     <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-muted/40 hover:bg-muted/70 transition-colors">

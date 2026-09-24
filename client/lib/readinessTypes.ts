@@ -158,3 +158,83 @@ export interface RoadmapResponse {
   };
 }
 
+// ── Day 4 & Day 5 Historical Tracking & Current Readiness Types ─────────
+
+export interface ReadinessHistoryRecord {
+  _id?: string;
+  userId: string;
+  score: number;
+  resumeScore: number;
+  interviewScore: number;
+  skillScore: number;
+  communicationScore: number;
+  category: ReadinessCategory;
+  weakAreas: string[];
+  strongAreas: string[];
+  source?: string;
+  createdAt: string;
+}
+
+export interface ReadinessHistoryData {
+  history: ReadinessHistoryRecord[];
+  currentScore: number | null;
+  previousScore: number | null;
+  improvement: number | null;
+  category: ReadinessCategory | null;
+  lastUpdated?: string;
+  message?: string;
+}
+
+export interface ReadinessHistoryResponse {
+  success: boolean;
+  data?: ReadinessHistoryData;
+  error?: {
+    code: string;
+    message: string;
+  };
+}
+
+export interface WeakAreaWithRec {
+  area: string;
+  score: number;
+  recommendation: string;
+}
+
+export interface ReadinessCurrentData {
+  candidateId: string;
+  candidateName: string;
+  candidateType: CandidateType;
+  readinessScore: number;
+  category: ReadinessCategory;
+  scoreBreakdown: {
+    resume: number;
+    interview: number;
+    technicalSkills: number;
+    communication: number;
+  };
+  weakAreas: WeakAreaWithRec[];
+  strongAreas: string[];
+  moderateAreas: string[];
+  dataAvailability: {
+    resume: boolean;
+    interview: boolean;
+    skills: boolean;
+  };
+  historySummary: {
+    currentScore: number | null;
+    previousScore: number | null;
+    improvement: number | null;
+    totalSnapshots: number;
+  };
+  rawUnified: UnifiedReadinessProfile;
+}
+
+export interface ReadinessCurrentResponse {
+  success: boolean;
+  data?: ReadinessCurrentData;
+  error?: {
+    code: string;
+    message: string;
+  };
+}
+

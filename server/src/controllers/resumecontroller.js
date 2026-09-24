@@ -1,5 +1,6 @@
 const Groq = require("groq-sdk");
 const { extractTextFromDOCX } = require("../utils/docx-extractor.js");
+const { saveReadinessSnapshot } = require("../services/readiness.service.js");
 
 // Standard Interview Domains supported by the platform
 const DOMAINS = [
@@ -1178,6 +1179,12 @@ JSON Schema:
                 },
                 { upsert: true, new: true }
               );
+
+              // Auto-record snapshot in historical tracking asynchronously
+              saveReadinessSnapshot(req.userId, {
+                resumeScore: parsed.resumeQuality?.overallScore || 0,
+                source: "resume",
+              }).catch((e) => console.warn("[ResumeController] Background snapshot failed:", e.message));
             } catch (saveErr) {
               console.warn("Could not persist AI resume analysis to MongoDB:", saveErr.message);
             }
@@ -1220,6 +1227,12 @@ JSON Schema:
           },
           { upsert: true, new: true }
         );
+
+        // Auto-record snapshot in historical tracking asynchronously
+        saveReadinessSnapshot(req.userId, {
+          resumeScore: analysis.resumeQuality?.overallScore || 0,
+          source: "resume",
+        }).catch((e) => console.warn("[ResumeController] Background snapshot failed:", e.message));
       } catch (saveErr) {
         console.warn("Could not persist deterministic resume analysis to MongoDB:", saveErr.message);
       }

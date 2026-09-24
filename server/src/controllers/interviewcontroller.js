@@ -1,5 +1,6 @@
 const Groq = require("groq-sdk");
 const Interview = require("../models/Interview.js");
+const { saveReadinessSnapshot } = require("../services/readiness.service.js");
 
 const QUESTION_BANK = {
   "JavaScript/Node.js": {
@@ -1549,6 +1550,12 @@ Return strictly valid JSON with no markdown fences:
       interview.duration = durationMin;
 
       await interview.save();
+
+      // Auto-record snapshot in historical tracking asynchronously
+      saveReadinessSnapshot(interview.userId, { interviewScore: avgScore, source: "interview" }).catch((err) =>
+        console.warn("[InterviewController] Background interview snapshot failed:", err.message)
+      );
+
       return res.json({
         feedback,
         score: avgScore,
@@ -1766,6 +1773,12 @@ Return ONLY the question, nothing else.`,
       interview.duration = durationMin;
 
       await interview.save();
+
+      // Auto-record snapshot in historical tracking asynchronously
+      saveReadinessSnapshot(interview.userId, { interviewScore: avgScore, source: "interview" }).catch((err) =>
+        console.warn("[InterviewController] Background interview snapshot failed:", err.message)
+      );
+
       return res.json({
         feedback: skipFeedback,
         score: avgScore,
@@ -1907,6 +1920,11 @@ const terminateInterview = async (req, res) => {
     });
 
     await interview.save();
+
+    // Auto-record snapshot in historical tracking asynchronously
+    saveReadinessSnapshot(interview.userId, { interviewScore: 0, source: "interview" }).catch((err) =>
+      console.warn("[InterviewController] Background interview snapshot failed:", err.message)
+    );
 
     res.json({
       message: "Interview terminated",

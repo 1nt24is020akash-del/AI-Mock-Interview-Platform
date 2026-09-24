@@ -9,6 +9,10 @@ const {
   getUnifiedCandidateData,
   saveCandidateSkills,
   saveCandidateResume,
+  saveReadinessSnapshot,
+  getReadinessHistory,
+  getCurrentReadiness,
+  calculateReadinessPure,
 } = require("../services/readiness.service.js");
 const {
   generatePersonalizedRoadmap,
@@ -124,6 +128,11 @@ async function updateSkillAssessment(req, res) {
       });
     }
 
+    // Auto-record point-in-time snapshot into ReadinessHistory
+    saveReadinessSnapshot(candidateId, { source: "skill_assessment" }).catch((err) =>
+      console.warn("[ReadinessController] Background skill snapshot failed:", err.message)
+    );
+
     return res.status(200).json({
       success: true,
       message: "Skill assessment updated successfully.",
@@ -160,6 +169,11 @@ async function updateResumeData(req, res) {
     }
 
     const result = await saveCandidateResume(candidateId, req.body);
+
+    // Auto-record point-in-time snapshot into ReadinessHistory
+    saveReadinessSnapshot(candidateId, { source: "resume" }).catch((err) =>
+      console.warn("[ReadinessController] Background resume snapshot failed:", err.message)
+    );
 
     return res.status(200).json({
       success: true,
@@ -340,6 +354,182 @@ async function updateCandidateType(req, res) {
   }
 }
 
+/**
+ * GET /api/readiness/current
+ * Returns candidate's current readiness score, breakdown, category, weak/strong areas,
+ * and data availability.
+ */
+async function getCurrentReadinessEndpoint(req, res) {
+  try {
+    const candidateId = req.userId || req.query.candidateId || req.params.candidateId;
+
+    if (!candidateId) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: "MISSING_CANDIDATE_ID",
+          message: "Candidate ID is required via authentication token or query parameter.",
+        },
+      });
+    }
+
+    const currentData = await getCurrentReadiness(candidateId);
+
+    return res.status(200).json({
+      success: true,
+      data: currentData,
+    });
+  } catch (error) {
+    console.error("[ReadinessController] Error fetching current readiness:", error);
+    return res.status(500).json({
+      success: false,
+      error: {
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Failed to retrieve current placement readiness profile.",
+      },
+    });
+  }
+}
+
+/**
+ * GET /api/readiness/history
+ * Returns historical readiness progression snapshots for the candidate.
+ */
+async function getReadinessHistoryEndpoint(req, res) {
+  try {
+    const candidateId = req.userId || req.query.candidateId || req.params.candidateId;
+
+    if (!candidateId) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: "MISSING_CANDIDATE_ID",
+          message: "Candidate ID is required via authentication token or query parameter.",
+        },
+      });
+    }
+
+    const historyData = await getReadinessHistory(candidateId);
+
+    return res.status(200).json({
+      success: true,
+      data: historyData,
+    });
+  } catch (error) {
+    console.error("[ReadinessController] Error fetching readiness history:", error);
+    return res.status(500).json({
+      success: false,
+      error: {
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Failed to retrieve placement readiness history.",
+      },
+    });
+  }
+}
+
+/**
+ * POST /api/readiness/calculate
+ * Pure mathematical score calculation using standard formula:
+ * readinessScore = resumeScore * 0.25 + interviewScore * 0.35 + skillScore * 0.40
+ */
+async function calculateReadinessEndpoint(req, res) {
+  try {
+    const { resumeScore, interviewScore, skillScore, communicationScore } = req.body;
+
+    const scores = [
+      { name: "resumeScore", val: resumeScore },
+      { name: "interviewScore", val: interviewScore },
+      { name: "skillScore", val: skillScore },
+    ];
+
+    for (const s of scores) {
+      if (s.val !== undefined && s.val !== null) {
+        const num = Number(s.val);
+        if (isNaN(num) || num < 0 || num > 100) {
+          return res.status(400).json({
+            success: false,
+            error: {
+              code: "INVALID_SCORE",
+              message: `${s.name} must be a number between 0 and 100. Received: ${s.val}`,
+            },
+          });
+        }
+      }
+    }
+
+    const result = calculateReadinessPure({
+      resumeScore: Number(resumeScore) || 0,
+      interviewScore: Number(interviewScore) || 0,
+      skillScore: Number(skillScore) || 0,
+      communicationScore: communicationScore !== undefined ? Number(communicationScore) : 0,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    console.error("[ReadinessController] Error in pure score calculation:", error);
+    return res.status(500).json({
+      success: false,
+      error: {
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Failed to calculate readiness score.",
+      },
+    });
+  }
+}
+
+/**
+ * POST /api/readiness/history
+ * Records a new historical readiness snapshot manually or programmatically.
+ */
+async function recordReadinessHistoryEndpoint(req, res) {
+  try {
+    const candidateId = req.userId || req.body.candidateId;
+
+    if (!candidateId) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: "MISSING_CANDIDATE_ID",
+          message: "Candidate ID is required.",
+        },
+      });
+    }
+
+    const snapshot = await saveReadinessSnapshot(candidateId, {
+      ...req.body,
+      source: req.body.source || "manual",
+    });
+
+    if (!snapshot) {
+      return res.status(500).json({
+        success: false,
+        error: {
+          code: "SNAPSHOT_CREATION_FAILED",
+          message: "Could not create readiness history snapshot.",
+        },
+      });
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: "Readiness history snapshot recorded successfully.",
+      data: snapshot,
+    });
+  } catch (error) {
+    console.error("[ReadinessController] Error recording readiness history:", error);
+    return res.status(500).json({
+      success: false,
+      error: {
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Failed to record readiness history snapshot.",
+      },
+    });
+  }
+}
+
 module.exports = {
   analyzeCandidateReadiness,
   getUnifiedReadiness,
@@ -348,4 +538,8 @@ module.exports = {
   generateRoadmap,
   getRoadmap,
   updateCandidateType,
+  getCurrentReadinessEndpoint,
+  getReadinessHistoryEndpoint,
+  calculateReadinessEndpoint,
+  recordReadinessHistoryEndpoint,
 };

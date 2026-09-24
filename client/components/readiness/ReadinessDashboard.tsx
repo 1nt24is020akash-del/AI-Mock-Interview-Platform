@@ -80,6 +80,83 @@ const CANDIDATE_TYPE_CONFIG: Record<
   },
 };
 
+function CircularGauge({
+  score,
+  category,
+}: {
+  score: number;
+  category: string;
+}) {
+  const radius = 64;
+  const strokeWidth = 11;
+  const normalizedRadius = radius - strokeWidth / 2;
+  const circumference = normalizedRadius * 2 * Math.PI;
+  const strokeDashoffset = circumference - (score / 100) * circumference;
+
+  let strokeColor = "#f43f5e";
+  let textColor = "text-rose-400";
+  let badgeColor = "bg-rose-500/10 text-rose-300 border-rose-500/30";
+
+  if (score >= 80) {
+    strokeColor = "#10b981";
+    textColor = "text-emerald-400";
+    badgeColor = "bg-emerald-500/10 text-emerald-300 border-emerald-500/30";
+  } else if (score >= 65) {
+    strokeColor = "#f59e0b";
+    textColor = "text-amber-400";
+    badgeColor = "bg-amber-500/10 text-amber-300 border-amber-500/30";
+  }
+
+  return (
+    <div className="flex flex-col items-center justify-center p-5 bg-gradient-to-b from-zinc-900 to-zinc-950 rounded-2xl border border-zinc-800 shadow-xl">
+      <div className="relative w-36 h-36 flex items-center justify-center">
+        <svg
+          height={radius * 2}
+          width={radius * 2}
+          className="rotate-[-90deg] transition-all duration-1000 ease-out"
+        >
+          <circle
+            stroke="#27272a"
+            fill="transparent"
+            strokeWidth={strokeWidth}
+            r={normalizedRadius}
+            cx={radius}
+            cy={radius}
+          />
+          <circle
+            stroke={strokeColor}
+            fill="transparent"
+            strokeWidth={strokeWidth}
+            strokeDasharray={`${circumference} ${circumference}`}
+            style={{ strokeDashoffset }}
+            strokeLinecap="round"
+            r={normalizedRadius}
+            cx={radius}
+            cy={radius}
+            className="transition-all duration-1000 ease-out"
+          />
+        </svg>
+        <div className="absolute flex flex-col items-center justify-center text-center">
+          <span className={`text-3xl font-black tracking-tight ${textColor}`}>
+            {score}
+          </span>
+          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
+            / 100
+          </span>
+        </div>
+      </div>
+      <div className="mt-2 text-center space-y-1">
+        <span
+          className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-black uppercase tracking-wider border ${badgeColor}`}
+        >
+          <ShieldCheck className="w-3 h-3" />
+          {category}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export default function ReadinessDashboard({
   candidateId,
   onNavigateToInterview,
@@ -419,6 +496,123 @@ export default function ReadinessDashboard({
           </div>
         </div>
       </Card>
+
+      {/* ── OVERALL READINESS SCORE GAUGE & BREAKDOWN BARS ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+        <div className="lg:col-span-4 flex flex-col justify-between">
+          <CircularGauge
+            score={readinessScore ?? 0}
+            category={category || "Needs Improvement"}
+          />
+        </div>
+        <Card className="lg:col-span-8 p-6 bg-gradient-to-br from-zinc-900 to-zinc-950 border border-zinc-800 rounded-2xl shadow-xl flex flex-col justify-between space-y-4">
+          <div>
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+              <h3 className="text-sm font-black text-white tracking-tight flex items-center gap-2">
+                <Award className="w-4 h-4 text-primary" />
+                Readiness Score Breakdown
+              </h3>
+              <p className="text-[10px] text-zinc-400 font-mono">
+                Formula: Resume × 25% + Interview × 35% + Skills × 40%
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
+              {/* Resume */}
+              <div className="p-3.5 rounded-xl bg-zinc-950/70 border border-zinc-800 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-zinc-300 flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-cyan-400" /> Resume Score (25%)
+                  </span>
+                  <span className="font-mono font-black text-cyan-400 text-sm">
+                    {resume?.resumeScore ?? 0}%
+                  </span>
+                </div>
+                <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${getBarColor(resume?.resumeScore ?? 0)}`}
+                    style={{ width: `${resume?.resumeScore ?? 0}%` }}
+                  />
+                </div>
+              </div>
+              {/* Interview */}
+              <div className="p-3.5 rounded-xl bg-zinc-950/70 border border-zinc-800 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-zinc-300 flex items-center gap-1.5">
+                    <Award className="w-3.5 h-3.5 text-emerald-400" /> Interview Score (35%)
+                  </span>
+                  <span className="font-mono font-black text-emerald-400 text-sm">
+                    {interview?.overallInterviewScore ?? 0}%
+                  </span>
+                </div>
+                <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${getBarColor(interview?.overallInterviewScore ?? 0)}`}
+                    style={{ width: `${interview?.overallInterviewScore ?? 0}%` }}
+                  />
+                </div>
+              </div>
+              {/* Skills */}
+              <div className="p-3.5 rounded-xl bg-zinc-950/70 border border-zinc-800 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-zinc-300 flex items-center gap-1.5">
+                    <Code2 className="w-3.5 h-3.5 text-purple-400" /> Technical Skills (40%)
+                  </span>
+                  <span className="font-mono font-black text-purple-400 text-sm">
+                    {skills && Object.keys(skills).length > 0
+                      ? Math.round(
+                          Object.values(skills).reduce((a, b) => a + b, 0) /
+                            Object.values(skills).length
+                        )
+                      : 0}
+                    %
+                  </span>
+                </div>
+                <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${getBarColor(
+                      skills && Object.keys(skills).length > 0
+                        ? Math.round(
+                            Object.values(skills).reduce((a, b) => a + b, 0) /
+                              Object.values(skills).length
+                          )
+                        : 0
+                    )}`}
+                    style={{
+                      width: `${
+                        skills && Object.keys(skills).length > 0
+                          ? Math.round(
+                              Object.values(skills).reduce((a, b) => a + b, 0) /
+                                Object.values(skills).length
+                            )
+                          : 0
+                      }%`,
+                    }}
+                  />
+                </div>
+              </div>
+              {/* Communication */}
+              <div className="p-3.5 rounded-xl bg-zinc-950/70 border border-zinc-800 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-zinc-300 flex items-center gap-1.5">
+                    <TrendingUp className="w-3.5 h-3.5 text-blue-400" /> Communication
+                  </span>
+                  <span className="font-mono font-black text-blue-400 text-sm">
+                    {interview?.communicationScore ?? 0}%
+                  </span>
+                </div>
+                <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${getBarColor(
+                      interview?.communicationScore ?? 0
+                    )}`}
+                    style={{ width: `${interview?.communicationScore ?? 0}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </Card>
+      </div>
 
       {/* ── 2. THREE UNIFIED SOURCES GRID ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
