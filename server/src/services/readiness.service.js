@@ -325,14 +325,23 @@ const WEAK_AREA_RECOMMENDATIONS = {
  * Pure calculation of readiness score and classification according to standard formula:
  * readinessScore = resumeScore * 0.25 + interviewScore * 0.35 + skillScore * 0.40
  */
+function sanitizeScore(val) {
+  if (val === undefined || val === null) return 0;
+  const num = Number(val);
+  if (isNaN(num) || !Number.isFinite(num)) return 0;
+  return Math.max(0, Math.min(100, Math.round((num + Number.EPSILON) * 100) / 100));
+}
+
 function calculateReadinessPure({ resumeScore = 0, interviewScore = 0, skillScore = 0, communicationScore = 0 }) {
-  const rScore = Number(resumeScore) || 0;
-  const iScore = Number(interviewScore) || 0;
-  const sScore = Number(skillScore) || 0;
-  const cScore = typeof communicationScore === "number" ? communicationScore : 0;
+  const rScore = sanitizeScore(resumeScore);
+  const iScore = sanitizeScore(interviewScore);
+  const sScore = sanitizeScore(skillScore);
+  const cScore = communicationScore !== undefined && communicationScore !== null
+    ? sanitizeScore(communicationScore)
+    : 0;
 
   const rawScore = rScore * 0.25 + iScore * 0.35 + sScore * 0.40;
-  const readinessScore = Math.round((rawScore + Number.EPSILON) * 100) / 100;
+  const readinessScore = Math.max(0, Math.min(100, Math.round((rawScore + Number.EPSILON) * 100) / 100));
   const category = classifyCandidate(readinessScore);
 
   const weakList = [];

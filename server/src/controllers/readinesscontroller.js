@@ -440,6 +440,7 @@ async function calculateReadinessEndpoint(req, res) {
       { name: "resumeScore", val: resumeScore },
       { name: "interviewScore", val: interviewScore },
       { name: "skillScore", val: skillScore },
+      { name: "communicationScore", val: communicationScore },
     ];
 
     for (const s of scores) {
